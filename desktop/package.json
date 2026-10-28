@@ -1,0 +1,48 @@
+{
+  "name": "sop-studio-desktop",
+  "version": "0.2.0",
+  "private": true,
+  "description": "离线 SOP 编写、预览与可编辑 Word 导出工具",
+  "author": "SOP 工作台",
+  "license": "UNLICENSED",
+  "main": "main.cjs",
+  "scripts": {
+    "prepare:renderer": "node prepare.cjs",
+    "start": "node prepare.cjs && electron .",
+    "dist": "python build-windows.py"
+  },
+  "devDependencies": {
+    "electron": "45.1.0",
+    "electron-builder": "26.18.0"
+  },
+  "build": {
+    "appId": "local.sopstudio.desktop",
+    "productName": "SOP工作台",
+    "executableName": "SOPStudio",
+    "directories": { "output": "../outputs/软件安装包", "buildResources": "build" },
+    "files": ["main.cjs", "preload.cjs", "renderer/**/*", "build/icon.ico"],
+    "asar": true,
+    "electronLanguages": ["zh-CN", "en-US"],
+    "win": {
+      "icon": "build/icon.ico",
+      "target": ["nsis", "zip"],
+      "artifactName": "SOPStudio-${version}-${arch}.${ext}",
+      "requestedExecutionLevel": "asInvoker"
+    },
+    "nsis": {
+      "artifactName": "SOPStudio-Setup-${version}-${arch}.${ext}",
+      "oneClick": false,
+      "perMachine": false,
+      "allowElevation": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "SOP工作台",
+      "uninstallDisplayName": "SOP工作台",
+      "deleteAppDataOnUninstall": false,
+      "runAfterFinish": true,
+      "installerLanguages": ["zh_CN", "en_US"],
+      "language": "2052"
+    }
+  }
+}

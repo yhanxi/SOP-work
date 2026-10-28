@@ -1,0 +1,14 @@
+{
+  "name": "sop-work",
+  "version": "0.2.0",
+  "private": true,
+  "description": "SOP 工作台：浏览器编写与 Windows 桌面应用",
+  "engines": {"node": ">=22"},
+  "scripts": {
+    "dev": "node scripts/serve.cjs",
+    "start": "node scripts/serve.cjs",
+    "check": "node scripts/check-project.cjs",
+    "test": "node scripts/check-project.cjs",
+    "test:browser": "node tests/browser-smoke.cjs"
+  }
+}
