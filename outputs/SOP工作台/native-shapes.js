@@ -28,15 +28,20 @@ function create(doc,{nextId,paragraph}){
  function photoMarks(photo,left,top,width,height){
   const result=[];
   for(const [i,m]of (photo.marks||[]).entries()){
-   const color=hex(m.color),x=left+m.x*width,y=top+m.y*height,x2=left+m.x2*width,y2=top+m.y2*height,name='SOP标注 '+(i+1)+' '+({arrow:'箭头',circle:'圈选',text:'文字'}[m.type]||'');
-   if(m.type==='arrow')result.push(line(name,x,y,x2,y2,{arrow:true,color,width:1.2}));
-   else if(m.type==='circle')result.push(nativeShape({name,x:Math.min(x,x2),y:Math.min(y,y2),width:Math.max(.5,Math.abs(x2-x)),height:Math.max(.5,Math.abs(y2-y)),geometry:'ellipse',stroke:color,lineWidth:1.2}));
-   else if(m.type==='text'){const fontSize=Math.max(8,width/28),text=String(m.text||'标注'),textWidth=Math.max(30,Array.from(text).reduce((n,c)=>n+(c.charCodeAt(0)>255?1:.58),0)*fontSize+4);result.push(nativeShape({name,x:x-1,y:y-fontSize,width:textWidth,height:fontSize*1.6,geometry:'rect',text,stroke:null,fill:'FFF7B7',fontSize,textColor:color,align:'left'}));}
+   const color=hex(m.color),x=left+m.x*width,y=top+m.y*height,x2=left+m.x2*width,y2=top+m.y2*height,name='SOP标注 '+(i+1)+' '+({arrow:'箭头',circle:'圈选',rect:'矩形',line:'直线',text:'文字'}[m.type]||'');
+   if(m.type==='line')result.push(line(name,x,y,x2,y2,{color,width:1.2}));
+   else if(m.type==='arrow')result.push(line(name,x,y,x2,y2,{arrow:true,color,width:1.2}));
+   else if(m.type==='circle'||m.type==='rect')result.push(nativeShape({name,x:Math.min(x,x2),y:Math.min(y,y2),width:Math.max(.5,Math.abs(x2-x)),height:Math.max(.5,Math.abs(y2-y)),geometry:m.type==='rect'?'rect':'ellipse',stroke:color,lineWidth:1.2}));
+   else if(m.type==='text'){const fontSize=width*(Number(m.fontSize)||1/28),text=String(m.text||'标注'),textWidth=Math.max(30,Array.from(text).reduce((n,c)=>n+(c.charCodeAt(0)>255?1:.58),0)*fontSize+4);result.push(nativeShape({name,x:x-1,y:y-fontSize,width:textWidth,height:fontSize*1.6,geometry:'rect',text,stroke:null,fill:m.background==='transparent'?null:hex(m.background||'#fff7b7'),fontSize,textColor:color,align:'left'}));}
   }
   return result;
  }
  function flowParagraph(project,chunk=0){
-  const seen=new Set(),all=project.pages.filter(p=>{if(seen.has(p.processId))return false;seen.add(p.processId);return true;}),pages=all.slice(chunk*24,chunk*24+24),p=paragraph(doc,' ',2),pr=[...p.children].find(e=>e.localName==='pPr'),spacing=[...pr.children].find(e=>e.localName==='spacing');
+  if(project.frontContent?.flowGraph){const m=window.SOP_OBJECTS.normalize(project.frontContent.flowGraph),p=paragraph(doc,' ',2),pr=[...p.children].find(e=>e.localName==='pPr'),spacing=[...pr.children].find(e=>e.localName==='spacing'),sx=Math.min(740/m.width,410/m.height),sy=sx;spacing.setAttributeNS(W,'w:line',String(Math.round(m.height*sy*20)));spacing.setAttributeNS(W,'w:lineRule','exact');spacing.setAttributeNS(W,'w:after','0');
+   for(const e of m.edges){const q=window.SOP_OBJECTS.edgePoints(m,e);if(!q)continue;p.append(line('流程连接 '+e.id,q.x1*sx,q.y1*sy,q.x2*sx,q.y2*sy,{arrow:true,color:e.color.slice(1)}));if(e.label)p.append(nativeShape({name:'分支标签 '+e.id,x:(q.x1+q.x2)/2*sx-30,y:(q.y1+q.y2)/2*sy-14,width:60,height:15,text:e.label,textColor:e.color.slice(1),stroke:null,fill:'FFFFFF',fontSize:9}));}
+   for(const o of m.objects)p.append(nativeShape({name:'流程节点 '+o.id,x:o.x*sx,y:o.y*sy,width:o.w*sx,height:o.h*sy,geometry:({text:'rect',ellipse:'ellipse',diamond:'diamond',arrow:'line',line:'line'})[o.type]||'rect',text:['line','arrow'].includes(o.type)?undefined:window.SOP_OBJECTS.wrapText(o.text,o.w,o.fontSize).join('\n'),stroke:o.type==='text'?null:o.color.slice(1),fill:o.fill==='transparent'?null:o.fill.slice(1),fontSize:o.fontSize*sy,textColor:o.color.slice(1),arrow:o.type==='arrow',flipH:!!o.flipX,flipV:!!o.flipY,connector:['line','arrow'].includes(o.type)}));return p;
+  }
+  const seen=new Set(),all=project.frontContent?.flowManual?String(project.frontContent.flowText||'').split('\n').filter(x=>x.trim()).map(name=>({name})):project.pages.filter(p=>{if(seen.has(p.processId))return false;seen.add(p.processId);return true;}),pages=all.slice(chunk*24,chunk*24+24),p=paragraph(doc,' ',2),pr=[...p.children].find(e=>e.localName==='pPr'),spacing=[...pr.children].find(e=>e.localName==='spacing');
   spacing.setAttributeNS(W,'w:line','8200');spacing.setAttributeNS(W,'w:lineRule','exact');spacing.setAttributeNS(W,'w:after','0');
   const sx=740/1500,sy=410/850;
   pages.forEach((page,i)=>{

@@ -20,7 +20,8 @@
     "productName": "SOP工作台",
     "executableName": "SOPStudio",
     "directories": { "output": "../outputs/软件安装包", "buildResources": "build" },
-    "files": ["main.cjs", "preload.cjs", "renderer/**/*", "build/icon.ico"],
+    "files": ["main.cjs", "preload.cjs",
+      "project-files.cjs", "renderer/**/*", "build/icon.ico"],
     "asar": true,
     "electronLanguages": ["zh-CN", "en-US"],
     "win": {

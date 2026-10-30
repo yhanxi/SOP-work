@@ -1,0 +1,82 @@
+/* Keep page, directory and properties independently scrollable within the viewport. */
+@media screen {
+ html,body{height:100%;height:100dvh;overflow:hidden}
+ body{display:flex;flex-direction:column}
+ .appbar{flex:0 0 auto}
+ .workspace{flex:1;min-height:0;height:auto;overflow:hidden;grid-template-rows:minmax(0,1fr)}
+ .sidebar,.editor,.preview-panel{min-height:0;max-height:100%;overscroll-behavior:contain}
+ .sidebar{overflow:hidden}
+ .nav-list{flex:1;min-height:0;max-height:none;overflow-y:auto;overscroll-behavior:contain}
+ .side-title,.segmented,.side-actions,.side-footer{flex-shrink:0}
+ .editor,.preview-panel{overflow:auto;scrollbar-gutter:stable}
+ #continueBtn[hidden]{display:none!important}
+ .editor-heading{position:relative}
+ .object-dialog[open]{display:flex;flex-direction:column;height:min(900px,96dvh);max-height:96dvh}
+ .object-dialog>.dialog-head,.object-dialog>.dialog-foot,.object-tools{flex:0 0 auto}
+ .object-layout{flex:1;min-height:0;overflow:hidden}
+ .object-stage,.object-properties{min-height:0;max-height:none;overflow:auto;overscroll-behavior:contain;scrollbar-gutter:stable}
+ .object-stage [data-endpoint]{cursor:crosshair}
+ .line-endpoints{display:grid;grid-template-columns:1fr 1fr;gap:5px 10px}
+ .line-endpoints small{grid-column:1/-1;font-size:11px}
+ .object-properties [data-object-color],.object-properties [data-object-fill],.object-properties [data-edge-color]{margin-top:14px}
+ @media(max-width:1099px) and (min-width:681px){
+  .workspace{display:grid;grid-template-columns:180px minmax(0,1fr);grid-template-rows:minmax(0,1fr) minmax(0,1fr)}
+  .sidebar{grid-column:1;grid-row:1/3}
+  .preview-panel{grid-column:2;grid-row:1}
+  .editor{grid-column:2;grid-row:2}
+ }
+ @media(max-width:680px){
+  .workspace{display:grid;grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(90px,.6fr) minmax(140px,1fr) minmax(140px,1fr)}
+  .sidebar{grid-column:1;grid-row:1;overflow:auto;padding:10px 12px;gap:7px}
+  .sidebar .nav-list{flex:none;max-height:150px;min-height:50px}
+  .preview-panel{grid-column:1;grid-row:2;padding:14px 12px}
+  .editor{grid-column:1;grid-row:3;padding:16px}
+  .object-dialog[open]{height:96dvh}
+  .object-layout{display:grid;grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(120px,1fr) minmax(100px,.7fr)}
+  .object-properties{max-height:none;border-left:0;border-top:1px solid var(--line)}
+  .object-dialog .dialog-head small{display:none}
+  .object-tools{max-height:105px;overflow:auto}
+ }
+}
+.sop-color-picker{width:100%;position:relative;font-size:12px;min-width:180px}
+.sop-color-picker>summary{cursor:pointer;list-style:none;display:flex;justify-content:space-between;align-items:center;gap:10px;padding:8px 10px;border:1px solid #c7d4dc;border-radius:6px;background:white;color:#243e46}
+.sop-color-picker>summary::after{content:'▾';color:#70878c}
+.sop-color-current{display:inline-block;width:32px;height:17px;border:1px solid #9babaf;margin-left:auto}
+.sop-color-panel{padding:12px;background:white;border:1px solid #c7d4dc;border-radius:6px;margin-top:5px;box-shadow:0 3px 12px #20353d14;min-width:200px;max-width:290px}
+.sop-color-panel strong{display:block;font-size:12px;font-weight:500;margin:2px 0 8px}
+.sop-color-panel small{display:block;font-size:11px;margin:0 0 7px}
+.sop-color-grid{display:grid!important;grid-template-columns:repeat(10,minmax(0,1fr));gap:3px;margin:0 0 12px!important;max-width:265px}
+button.sop-color-swatch{display:block;border:1px solid #c7cfd2;border-radius:0;min-width:0;width:100%;height:18px;min-height:18px;padding:0!important;box-shadow:none}
+button.sop-color-swatch:hover,button.sop-color-swatch[aria-pressed=true]{outline:2px solid #0b6872;outline-offset:1px;z-index:1}
+.sop-color-custom{display:grid;grid-template-columns:32px minmax(65px,1fr) auto;gap:6px;align-items:center;margin-bottom:10px}
+.sop-color-custom input{margin:0!important;min-width:0;padding:5px!important;height:30px;font-size:11px}
+.sop-color-custom input[type=color]{width:32px;padding:2px!important}
+.sop-color-custom button,.sop-color-transparent{padding:5px 7px!important;font-size:11px!important}
+.annotation-presets>.sop-color-picker{flex:1}
+.annotation-presets .color-presets{display:block;min-width:220px}
+.annotation-presets>div>span{display:none}
+.sop-color-panel .sop-color-recent{margin:0}
+
+.object-stage [data-resize="nw"],.object-stage [data-resize="se"]{cursor:nwse-resize}
+.object-stage [data-resize="ne"],.object-stage [data-resize="sw"]{cursor:nesw-resize}
+
+/* Compact application chrome; document and print typography are unchanged. */
+@media screen {
+ .appbar{min-height:60px;padding:10px 16px;gap:16px;flex-wrap:nowrap}
+ .brand{gap:8px;min-width:0}
+ .brand img{width:32px;height:32px;object-fit:contain;flex-shrink:0}
+ .brand strong{font-size:15px;white-space:nowrap;line-height:1.3}
+ .brand small{display:none}
+ .doc-heading{min-width:0;flex:1}
+ .doc-heading strong{font-size:13px;line-height:1.35;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+ .doc-heading span{font-size:11px;line-height:1.2;margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+ .actions{gap:6px;flex-wrap:nowrap;flex-shrink:0;align-items:center}
+ .actions button{font-size:13px;line-height:18px;padding:6px 10px;min-height:32px;border-radius:6px}
+ @media(max-width:680px){
+  .appbar{min-height:0;padding:8px 12px;gap:8px;flex-wrap:wrap}
+  .brand img{width:28px;height:28px}
+  .brand strong{font-size:14px}
+  .actions{width:100%;flex-wrap:wrap}
+  .actions button{font-size:12px;padding:5px 8px;min-height:30px}
+ }
+}

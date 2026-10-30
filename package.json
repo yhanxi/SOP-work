@@ -9,6 +9,7 @@
     "start": "node scripts/serve.cjs",
     "check": "node scripts/check-project.cjs",
     "test": "node scripts/check-project.cjs",
-    "test:browser": "node tests/browser-smoke.cjs"
+    "test:browser": "node tests/browser-smoke.cjs",
+    "test:storage": "node tests/project-storage-browser.cjs"
   }
 }

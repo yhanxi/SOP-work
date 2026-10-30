@@ -1,0 +1,40 @@
+'use strict';
+const assert=require('node:assert/strict'),fs=require('node:fs/promises'),path=require('node:path'),os=require('node:os');
+const {createProjectFileService,atomicWrite}=require('../desktop/project-files.cjs');
+module.exports=(async()=>{
+ const dir=await fs.mkdtemp(path.join(os.tmpdir(),'sop-save-test-'));
+ const a=path.join(dir,'first.sop.json'),b=path.join(dir,'second.sop.json'),word=path.join(dir,'source.docx');
+ const text=value=>JSON.stringify({schema:'sop-studio/v1',meta:{value},settings:{},pages:[]});
+ let savePath=a,openPath=a,response=0,pause=0;
+ const dialog={showSaveDialog:async()=>savePath?{filePath:savePath}:{canceled:true},showOpenDialog:async()=>({filePaths:[openPath]}),showMessageBox:async()=>({response})};
+ const options={dialog,getWindow:()=>null,sessionFile:path.join(dir,'session.json'),pause:()=>pause++,resume:()=>pause--};
+ try{
+  const service=createProjectFileService(options);
+  assert.equal(await service.info(),null);
+  let result=await service.save({text:text(1),name:'first.sop.json'}),binding=result.binding;
+  assert.equal(await fs.readFile(a,'utf8'),text(1));assert(binding.token);
+  savePath=null;await service.save({text:text(2),token:binding.token});
+  assert.equal(await fs.readFile(a,'utf8'),text(2),'Save must reuse current path without a dialog');
+  assert((await service.save({text:text(3),token:binding.token,saveAs:true})).canceled);
+  assert.equal((await service.info()).token,binding.token,'Canceled Save As must preserve association');
+  savePath=b;result=await service.save({text:text(4),token:binding.token,saveAs:true});binding=result.binding;
+  assert.equal(await fs.readFile(a,'utf8'),text(2));assert.equal(await fs.readFile(b,'utf8'),text(4));
+  await fs.writeFile(b,text('external'));response=1;
+  assert((await service.save({text:text(5),token:binding.token})).canceled);
+  assert.equal(await fs.readFile(b,'utf8'),text('external'));
+  response=0;await service.save({text:text(5),token:binding.token});
+  assert.equal(await fs.readFile(b,'utf8'),text(5));
+  await assert.rejects(()=>service.save({text:text(9),token:'wrong-token'}));
+  await assert.rejects(()=>service.save({text:'{}',token:binding.token}));
+  assert.equal(await fs.readFile(b,'utf8'),text(5));
+  const restored=createProjectFileService(options);assert.equal((await restored.info()).token,binding.token);
+  openPath=a;const opened=await restored.open();assert.equal((await restored.info()).token,binding.token,'Opening is not committed until renderer validates');
+  const openedBinding=await restored.commit(opened.ticket);assert.equal(openedBinding.path,a);
+  const unchanged=await fs.readFile(a,'utf8');await assert.rejects(()=>atomicWrite(a,text(100),'wrong-hash'));assert.equal(await fs.readFile(a,'utf8'),unchanged,'Failed atomic write must keep original');
+  assert(!(await fs.readdir(dir)).some(name=>name.endsWith('.tmp')),'Temp file must be cleaned');
+  await fs.writeFile(word,'word original');openPath=word;const imported=await restored.open();assert.equal(imported.kind,'docx');await restored.commit(imported.ticket);assert.equal(await restored.info(),null);assert.equal(await fs.readFile(word,'utf8'),'word original');
+  assert.equal(pause,0,'Native dialogs must balance close timer suspension');
+  console.log('PASS: save/overwrite/save-as/cancel, conflict protection, validation, association recovery, Word isolation and atomic failure preservation');
+ }finally{await fs.rm(dir,{recursive:true,force:true});}
+})();
+if(require.main===module)module.exports.catch(error=>{console.error(error);process.exitCode=1;});
