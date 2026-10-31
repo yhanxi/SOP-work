@@ -10,6 +10,7 @@
     "check": "node scripts/check-project.cjs",
     "test": "node scripts/check-project.cjs",
     "test:browser": "node tests/browser-smoke.cjs",
+    "test:canvas": "node tests/canvas-snapping-browser.cjs",
     "test:storage": "node tests/project-storage-browser.cjs"
   }
 }

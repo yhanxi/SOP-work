@@ -2,11 +2,12 @@
 const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict'),{spawnSync}=require('node:child_process');
 const root=path.resolve(__dirname,'..'),source=path.join(root,'outputs/SOP工作台');
 const files=['desktop-updates.js','project-storage.js','app.js','word.js','native-import.js','template-v2.js','color-picker.js','object-workspace.js','native-shapes.js','assets.js','vendor/jszip.min.js'];
-for(const file of [...files.map(f=>path.join(source,f)),...['desktop/updater.cjs','desktop/update-core.cjs','desktop/update-helper.cjs','desktop/make-update.cjs','desktop/project-files.cjs','desktop/main.cjs','desktop/preload.cjs','desktop/prepare.cjs','scripts/serve.cjs','scripts/check-project.cjs','tests/project-files.cjs','tests/project-storage-browser.cjs','tests/browser-smoke.cjs','tests/object-model.cjs'].map(f=>path.join(root,f))]){
+for(const file of [...files.map(f=>path.join(source,f)),...['desktop/updater.cjs','desktop/update-core.cjs','desktop/update-helper.cjs','desktop/make-update.cjs','desktop/project-files.cjs','desktop/main.cjs','desktop/preload.cjs','desktop/prepare.cjs','scripts/serve.cjs','scripts/check-project.cjs','tests/canvas-snapping.cjs','tests/canvas-snapping-browser.cjs','tests/project-files.cjs','tests/project-storage-browser.cjs','tests/browser-smoke.cjs','tests/object-model.cjs'].map(f=>path.join(root,f))]){
  const result=spawnSync(process.execPath,['--check',file],{encoding:'utf8',windowsHide:true});assert.equal(result.status,0,result.stderr);
 }
 require('../tests/object-model.cjs');
 require('../tests/canvas-controls.cjs');
+require('../tests/canvas-snapping.cjs');
 const data=fs.readFileSync(path.join(source,'assets.js'),'utf8'),assets=JSON.parse(data.slice(data.indexOf('=')+1).replace(/;\s*$/,''));
 assert.equal(assets.seed.schema,'sop-studio/v1');assert.equal(assets.seed.settings.company,'');assert.equal(assets.seed.settings.logo,'');assert.equal(assets.seed.pages.length,1);assert.equal(assets.seed.pages[0].photos.length,0);
 assert.equal(fs.readFileSync(path.join(root,'desktop/blank-assets.js'),'utf8'),data,'Web and desktop generic assets must match');

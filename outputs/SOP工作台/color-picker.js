@@ -1,11 +1,11 @@
 /* Shared local palette for page objects and legacy photo annotations. */
 ((root)=>{
 'use strict';
-const base=['#ffffff','#000000','#e7e6e6','#44546a','#5b9bd5','#ed7d31','#a5a5a5','#ffc000','#4472c4','#70ad47'];
+const base=['#ffffff','#000000','#ff0000','#ff8000','#ffd400','#00b050','#00b0f0','#0070ff','#7030ff','#ff00b0'];
 const standard=['#c00000','#ff0000','#ffc000','#ffff00','#92d050','#00b050','#00b0f0','#0070c0','#002060','#7030a0'];
 const valid=c=>/^#[a-f\d]{6}$/i.test(c||'');
 function tint(hex,amount){const rgb=[1,3,5].map(i=>parseInt(hex.slice(i,i+2),16)),target=amount<0?0:255;return '#'+rgb.map(v=>Math.round(v+(target-v)*Math.abs(amount)).toString(16).padStart(2,'0')).join('');}
-const theme=[base,...[.8,.6,.4,-.25,-.5].map((amount,row)=>base.map((c,column)=>tint(c,column===0?[-.05,-.15,-.25,-.35,-.5][row]:column===1?[.5,.35,.25,.15,.05][row]:amount)))];
+const theme=[.55,.25,0,-.2,-.4,-.6].map((amount,row)=>base.map((color,column)=>tint(color,column===0?[0,-.08,-.2,-.35,-.55,-.75][row]:column===1?[.85,.65,.45,.25,.1,0][row]:amount)));
 let recent=[];try{const saved=JSON.parse(root.localStorage?.getItem('sop-color-history/v1')||'[]');if(Array.isArray(saved))recent=saved.filter(valid).slice(0,10);}catch{}
 function remember(color){if(!valid(color))return;color=color.toLowerCase();recent=[color,...recent.filter(c=>c!==color)].slice(0,10);try{root.localStorage?.setItem('sop-color-history/v1',JSON.stringify(recent));}catch{}}
 function mount(host,{value='#243e46',label='颜色',transparent=false,onChange}={}){
