@@ -1,7 +1,8 @@
 'use strict';
 const crypto=require('node:crypto');
 const repo='yhanxi/SOP-work';
-const releaseURL='https://github.com/'+repo+'/releases/latest';
+const releaseRepo='yhanxi/SOP-work-releases';
+const releaseURL='https://github.com/'+releaseRepo+'/releases/latest';
 function version(value){if(!/^\d+\.\d+\.\d+$/.test(value))throw Error('版本号无效');return value.split('.').map(Number);}
 function newer(a,b){const x=version(a),y=version(b);for(let i=0;i<3;i++)if(x[i]!==y[i])return x[i]>y[i];return false;}
 function httpsURL(value){const url=new URL(value);if(url.protocol!=='https:'||url.username||url.password||url.search||url.hash)throw Error('备用地址必须是不含账号、参数的 HTTPS 目录地址。');return url.href.replace(/\/$/,'');}
@@ -18,4 +19,4 @@ function verifyPackage(bytes,manifest){if(bytes.length!==manifest.bytes||digest(
  const node=JSON.parse(bytes.subarray(16,16+jsonSize).toString()).files['package.json'];if(!node||!/^\d+$/.test(node.offset))throw Error('程序包缺少版本信息');
  const start=8+headerSize+Number(node.offset),p=JSON.parse(bytes.subarray(start,start+node.size).toString());if(p.version!==manifest.version||p.name!=='sop-studio-desktop')throw Error('程序包版本不匹配');
 }
-module.exports={repo,releaseURL,newer,httpsURL,verify,digest,verifyPackage};
+module.exports={repo,releaseRepo,releaseURL,newer,httpsURL,verify,digest,verifyPackage};

@@ -9,7 +9,7 @@ module.exports=(async()=>{
  const sign=p=>{const text=JSON.stringify(p);return {payload:text,signature:crypto.sign(null,Buffer.from(text),keys.privateKey).toString('base64')};};
  const envelope=sign(payload);let bad=false,offline=false,slow=false,mirrorFail=false,requests=[];
  const net={async fetch(url,{signal}={}){requests.push(url);if(offline||mirrorFail&&url.includes('mirror.example'))throw Error('offline');if(slow&&url.endsWith('.asar'))return new Promise((_,reject)=>signal.addEventListener('abort',()=>reject(Object.assign(Error('canceled'),{name:'AbortError'})),{once:true}));
-  let body;if(url.includes('api.github.com'))body=JSON.stringify({assets:[{name:'SOP-update.json',browser_download_url:'https://github.com/'+core.repo+'/releases/download/v0.4.1/SOP-update.json'}]});else if(url.endsWith('.asar'))body=bad?Buffer.alloc(good.length):good;else body=JSON.stringify(envelope);
+  let body;if(url.includes('api.github.com'))body=JSON.stringify({assets:[{name:'SOP-update.json',browser_download_url:'https://github.com/'+core.releaseRepo+'/releases/download/v0.4.1/SOP-update.json'}]});else if(url.endsWith('.asar'))body=bad?Buffer.alloc(good.length):good;else body=JSON.stringify(envelope);
   return new Response(body,{status:200});}};
  const app={getPath:()=>dir,getVersion:()=> '0.4.0',isPackaged:false};const updater=createUpdater({app,net,publicKey,testMode:true,runtime:'45.1.0',onState:()=>{}});
  try{

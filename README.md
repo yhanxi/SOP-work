@@ -106,13 +106,13 @@ node node_modules/electron-builder/out/cli/cli.js --win nsis zip --x64 --publish
 
 在本机正常 Windows 终端运行根目录“打包桌面软件.cmd”；Codex 中需经授权在正常执行环境运行构建命令。不要替换系统 DLL、关闭终端安全软件或修改系统保护设置。云端构建可使用上方 GitHub Actions 工作流。
 
-## 桌面软件自动更新（0.4.0 起）
+## 桌面软件自动更新（0.4.1 起）
 
 左下角“软件更新”和菜单“帮助 → 检查软件更新”打开更新面板。默认启动后 10 秒自动检查，此后每 6 小时复查；可关闭自动检查。联网只查询版本及下载公开程序，不上传 SOP 内容。检查失败不影响离线编辑。
 
 日常更新下载约几百 KB 的 ASAR 程序包，不必下载完整 ZIP/安装 EXE。发现新版本后由用户点击下载；显示进度并可取消、重试。下载后验证 Ed25519 发布签名、SHA256、大小、平台、运行环境和程序包版本；不符合则拒绝安装。更换 Electron 运行环境的版本会提示到发布页下载安装 EXE。点击“重启并安装”仍经过现有项目保存/放弃/取消流程；取消时不退出。退出后独立更新助手替换程序，保留 `resources/app.asar.previous`，写入失败保留原程序。更新不修改项目文件和恢复缓存。软件安装目录不可写时会报告失败，不会自行提权。
 
-下载默认使用 `yhanxi/SOP-work` 的 GitHub Releases。主进程使用 Electron 网络栈，可遵循系统代理。无代理且 GitHub 无法访问时，需要配置可访问的自有 HTTPS 下载目录；仅缩小体积不能解决网络被阻断的问题。未预置公共代理或不受控镜像。
+下载默认使用 `yhanxi/SOP-work-releases` 的公开 GitHub Releases。主进程使用 Electron 网络栈，可遵循系统代理。无代理且 GitHub 无法访问时，需要配置可访问的自有 HTTPS 下载目录；仅缩小体积不能解决网络被阻断的问题。未预置公共代理或不受控镜像。
 
 ### 配置备用下载目录
 
@@ -128,6 +128,8 @@ node node_modules/electron-builder/out/cli/cli.js --win nsis zip --x64 --publish
 node desktop/make-update.cjs PATH_TO_APP_ASAR PATH_TO_PRIVATE_PEM OUTPUT_DIRECTORY
 ```
 
-将输出的 `SOP-update.json`、`SOPStudio-VERSION-app.asar`、安装 EXE 和 ZIP 上传至相应 GitHub Release，并在准备完成后发布 Release。备用目录额外提供相同内容的 `latest.json`。请先在独立运行时验证更新和项目保存，再发布签名清单。更换公钥必须通过已有可信密钥签名的版本或手动安装完成。
+将输出的 `SOP-update.json`、`SOPStudio-VERSION-app.asar`、安装 EXE 和 ZIP 上传至公开下载仓库 `yhanxi/SOP-work-releases` 的相应 GitHub Release，并在准备完成后发布 Release。备用目录额外提供相同内容的 `latest.json`。请先在独立运行时验证更新和项目保存，再发布签名清单。更换公钥必须通过已有可信密钥签名的版本或手动安装完成。
 
 `npm test` 包含签名/篡改、校验、版本比较、备用源回退、断网、取消重试及原子替换备份测试。桌面实际验证还覆盖保存取消阻止安装、真实 Node 更新助手替换、重开版本号和未保存内容恢复。0.4.0 的更新面板沿用工作台青灰配色、紧凑控件与可折叠下载设置，并验证常见状态和小窗口布局。
+
+源码仓库 `yhanxi/SOP-work` 保持私有；更新下载使用独立公开仓库 https://github.com/yhanxi/SOP-work-releases ，只放通用软件包、签名清单和校验文件。软件更新不需要源码仓库权限，也不附带 GitHub 令牌。0.4.1 修正了私有仓库匿名检查返回 404 的问题。

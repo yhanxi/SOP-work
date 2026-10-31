@@ -1,7 +1,7 @@
 'use strict';
 const packagedFs=require('node:fs/promises');
 const fs=(process.versions.electron?require('original-fs').promises:packagedFs),path=require('node:path'),{spawn}=require('node:child_process');
-const {repo,releaseURL,newer,httpsURL,verify,digest,verifyPackage}=require('./update-core.cjs');
+const {releaseRepo,releaseURL,newer,httpsURL,verify,digest,verifyPackage}=require('./update-core.cjs');
 function createUpdater({app,net,onState,publicKey,testMode=false,runtime=process.versions.electron}){
  const dir=path.join(app.getPath('userData'),'updates'),settingsFile=path.join(dir,'settings.json'),log=path.join(dir,'result.json');
  let settings={autoCheck:true,mirror:''},state={phase:'idle',current:app.getVersion(),releaseURL},candidate=null,envelope=null,downloaded=null,checking=false,downloading=false,controller;
@@ -17,7 +17,7 @@ function createUpdater({app,net,onState,publicKey,testMode=false,runtime=process
    for(const source of [...(settings.mirror?[settings.mirror+'/latest.json']:[]), 'github']){
     try{
      let url=source;
-     if(source==='github'){const release=JSON.parse((await bytes('https://api.github.com/repos/'+repo+'/releases/latest',1000000,15000)).toString());const asset=release.assets?.find(a=>a.name==='SOP-update.json');if(!asset){if(newer(String(release.tag_name||'').replace(/^v/,''),state.current)){emit({phase:'manual',message:'发现新版，请前往发布页下载安装。'});return state;}emit({phase:'current',message:'当前已是最新版本。'});return state;}url=asset.browser_download_url;if(!url.startsWith('https://github.com/'+repo+'/releases/download/'))throw Error('更新清单地址不受支持');}
+     if(source==='github'){const release=JSON.parse((await bytes('https://api.github.com/repos/'+releaseRepo+'/releases/latest',1000000,15000)).toString());const asset=release.assets?.find(a=>a.name==='SOP-update.json');if(!asset){if(newer(String(release.tag_name||'').replace(/^v/,''),state.current)){emit({phase:'manual',message:'发现新版，请前往发布页下载安装。'});return state;}emit({phase:'current',message:'当前已是最新版本。'});return state;}url=asset.browser_download_url;if(!url.startsWith('https://github.com/'+releaseRepo+'/releases/download/'))throw Error('更新清单地址不受支持');}
      const signed=JSON.parse((await bytes(url,50000,15000)).toString()),p=verify(signed,publicKey);
      if(candidate&&!newer(p.version,candidate.version))continue;candidate=p;envelope=signed;
      if(source==='github'||!manual)break;
@@ -32,7 +32,7 @@ function createUpdater({app,net,onState,publicKey,testMode=false,runtime=process
  }
  async function download(){await ready;if(downloading||checking||!candidate||!['available','error','canceled'].includes(state.phase))return state;downloading=true;emit({phase:'downloading',received:0,bytes:candidate.bytes,message:'正在下载更新…'});
   try{
-   const urls=[...(settings.mirror?[settings.mirror+'/'+candidate.asset]:[]),'https://github.com/'+repo+'/releases/download/v'+candidate.version+'/'+candidate.asset];let data,errors=[];
+   const urls=[...(settings.mirror?[settings.mirror+'/'+candidate.asset]:[]),'https://github.com/'+releaseRepo+'/releases/download/v'+candidate.version+'/'+candidate.asset];let data,errors=[];
    for(const url of urls)try{data=await bytes(url,candidate.bytes,90000,received=>emit({received}));verifyPackage(data,candidate);break;}catch(error){data=null;errors.push(error.message);if(error.name==='AbortError'&&state.phase==='canceled')throw error;}
    if(!data)throw Error(errors.join('；'));downloaded=path.join(dir,'pending.asar');await fs.writeFile(downloaded+'.tmp',data);await fs.rename(downloaded+'.tmp',downloaded);emit({phase:'ready',message:'更新已校验，保存项目后可重启安装。',received:data.length});
   }catch(error){if(state.phase!=='canceled')emit({phase:'error',message:'下载失败：'+error.message});}
