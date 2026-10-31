@@ -1,8 +1,8 @@
 'use strict';
 const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict'),{spawnSync}=require('node:child_process');
 const root=path.resolve(__dirname,'..'),source=path.join(root,'outputs/SOP工作台');
-const files=['project-storage.js','app.js','word.js','native-import.js','template-v2.js','color-picker.js','object-workspace.js','native-shapes.js','assets.js','vendor/jszip.min.js'];
-for(const file of [...files.map(f=>path.join(source,f)),...['desktop/project-files.cjs','desktop/main.cjs','desktop/preload.cjs','desktop/prepare.cjs','scripts/serve.cjs','scripts/check-project.cjs','tests/project-files.cjs','tests/project-storage-browser.cjs','tests/browser-smoke.cjs','tests/object-model.cjs'].map(f=>path.join(root,f))]){
+const files=['desktop-updates.js','project-storage.js','app.js','word.js','native-import.js','template-v2.js','color-picker.js','object-workspace.js','native-shapes.js','assets.js','vendor/jszip.min.js'];
+for(const file of [...files.map(f=>path.join(source,f)),...['desktop/updater.cjs','desktop/update-core.cjs','desktop/update-helper.cjs','desktop/make-update.cjs','desktop/project-files.cjs','desktop/main.cjs','desktop/preload.cjs','desktop/prepare.cjs','scripts/serve.cjs','scripts/check-project.cjs','tests/project-files.cjs','tests/project-storage-browser.cjs','tests/browser-smoke.cjs','tests/object-model.cjs'].map(f=>path.join(root,f))]){
  const result=spawnSync(process.execPath,['--check',file],{encoding:'utf8',windowsHide:true});assert.equal(result.status,0,result.stderr);
 }
 require('../tests/object-model.cjs');
@@ -13,6 +13,7 @@ assert.equal(fs.readFileSync(path.join(root,'desktop/blank-assets.js'),'utf8'),d
 const JSZip=require(path.join(source,'vendor/jszip.min.js'));
 (async()=>{
  await require('../tests/project-files.cjs');
+ await require('../tests/updater.cjs');
  const zip=await JSZip.loadAsync(assets.template,{base64:true});
  for(const name of Object.keys(zip.files).filter(n=>n.endsWith('.xml'))){
   const text=await zip.file(name).async('string');assert(!/蓝方|深圳|LENFOR|LF-MEGF|LF-MERG/i.test(text),'Private reference data in '+name);

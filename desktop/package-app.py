@@ -11,13 +11,14 @@ out=Path(sys.argv[1]) if len(sys.argv)>1 else root.parent/'outputs'/'软件安�
 source=root.parent/'outputs'/'SOP工作台'
 files={
  'package.json':json.dumps({k:v for k,v in json.loads((root/'package.json').read_text(encoding='utf-8')).items() if k in ['name','version','description','author','license','main']},ensure_ascii=False).encode(),
+ **{name:(root/name).read_bytes() for name in ['updater.cjs','update-core.cjs','update-helper.cjs','update-public.pem']},
  'main.cjs':(root/'main.cjs').read_bytes(),
  'project-files.cjs':(root/'project-files.cjs').read_bytes(),
  'preload.cjs':(root/'preload.cjs').read_bytes(),
  'build/icon.ico':(root/'build/icon.ico').read_bytes(),
  'renderer/assets.js':(root/'blank-assets.js').read_bytes()
 }
-for name in ['index.html','style.css','app.js','project-storage.js','native-import.js','template-v2.js','object-workspace.js','native-shapes.js','word.js','vendor/jszip.min.js','vendor/JSZip-LICENSE.md']:
+for name in ['index.html','style.css','app.js','desktop-updates.js','project-storage.js','native-import.js','template-v2.js','object-workspace.js','native-shapes.js','word.js','vendor/jszip.min.js','vendor/JSZip-LICENSE.md']:
     files['renderer/'+name]=(source/name).read_bytes()
 header={'files':{}};offset=0
 for name,data in sorted(files.items()):

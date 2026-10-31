@@ -21,7 +21,11 @@
     "executableName": "SOPStudio",
     "directories": { "output": "../outputs/软件安装包", "buildResources": "build" },
     "files": ["main.cjs", "preload.cjs",
-      "project-files.cjs", "renderer/**/*", "build/icon.ico"],
+      "project-files.cjs",
+      "updater.cjs",
+      "update-core.cjs",
+      "update-helper.cjs",
+      "update-public.pem", "renderer/**/*", "build/icon.ico"],
     "asar": true,
     "electronLanguages": ["zh-CN", "en-US"],
     "win": {

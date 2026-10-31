@@ -21,3 +21,7 @@ __pycache__/
 !.env.example
 .DS_Store
 Thumbs.db
+
+# Keep update signing keys private; only the public verification key is shipped.
+*private*.pem
+*.key
