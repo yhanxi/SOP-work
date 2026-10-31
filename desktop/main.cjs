@@ -22,7 +22,7 @@ ipcMain.handle('sop:export-pdf',async(event,name)=>{
 });
 function createWindow(){
  win=new BrowserWindow({width:1540,height:1000,minWidth:1000,minHeight:720,show:false,title:'SOP 工作台',backgroundColor:'#f5f7f8',icon:path.join(__dirname,'build/icon.ico'),webPreferences:{preload:path.join(__dirname,'preload.cjs'),contextIsolation:true,nodeIntegration:false,sandbox:true,webSecurity:true}});
- win.once('ready-to-show',()=>win.show());
+ win.once('ready-to-show',()=>{win.show();setTimeout(()=>{if(!win.isDestroyed()&&!win.isVisible()&&!win.isMinimized())win.show();},150);});
  win.webContents.setWindowOpenHandler(()=>({action:'deny'}));
  win.webContents.on('will-navigate',(event,url)=>{if(url!==origin+'/index.html')event.preventDefault();});
  win.webContents.session.setPermissionRequestHandler((_wc,_permission,callback)=>callback(false));
@@ -40,7 +40,7 @@ function createWindow(){
 }
 const single=testMode||app.requestSingleInstanceLock();
 if(!single)app.quit();else{
- app.on('second-instance',()=>{if(win){if(win.isMinimized())win.restore();win.focus();}});
+ app.on('second-instance',()=>{if(win){if(win.isMinimized())win.restore();win.show();win.focus();}});
  app.whenReady().then(()=>{
   const root=path.join(__dirname,'renderer');
   protocol.handle('sop',async request=>{try{const url=new URL(request.url);if(url.host!=='app')return new Response('',{status:403});const relative=decodeURIComponent(url.pathname).replace(/^\/+/,''),file=path.resolve(root,relative||'index.html');if(!file.startsWith(root+path.sep)||!['.html','.js','.css','.png','.ico','.md'].includes(path.extname(file)))return new Response('',{status:403});const response=await net.fetch(pathToFileURL(file).toString());const headers=new Headers(response.headers);headers.set('Content-Security-Policy',"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'none'; object-src 'none'; base-uri 'none'; frame-src 'none'");return new Response(response.body,{status:response.status,headers});}catch{return new Response('',{status:404});}});

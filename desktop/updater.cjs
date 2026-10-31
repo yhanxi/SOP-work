@@ -46,7 +46,7 @@ function createUpdater({app,net,onState,publicKey,testMode=false,runtime=process
   async launchInstall(){
    const helper=path.join(dir,'apply-update.cjs'),config=path.join(dir,'apply-update.json'),target=path.join(process.resourcesPath,'app.asar');
    await fs.writeFile(helper,await packagedFs.readFile(path.join(__dirname,'update-helper.cjs')));
-   await fs.writeFile(config,JSON.stringify({exe:process.execPath,staged:downloaded,manifest:envelope,key:publicKey,oldHash:digest(await fs.readFile(target)),log,restart:!testMode}));
+   await fs.writeFile(config,JSON.stringify({exe:process.execPath,staged:downloaded,manifest:envelope,key:publicKey,oldHash:digest(await fs.readFile(target)),log,parentPid:process.pid,restart:!testMode}));
    const child=spawn(process.execPath,[helper,config],{env:{...process.env,ELECTRON_RUN_AS_NODE:'1'},detached:true,stdio:'ignore',windowsHide:true});
    await new Promise((resolve,reject)=>{child.once('spawn',resolve);child.once('error',reject);});child.unref();
   },

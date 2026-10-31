@@ -26,7 +26,11 @@ module.exports=(async()=>{
   const exe=path.join(dir,'runtime','SOPStudio.exe'),target=path.join(dir,'runtime/resources/app.asar'),staged=path.join(dir,'staged.asar'),log=path.join(dir,'result.json'),old=archive('0.4.0');await fs.mkdir(path.dirname(target),{recursive:true});await fs.writeFile(target,old);await fs.writeFile(staged,good);
   const config={exe,staged,manifest:envelope,key:publicKey,oldHash:core.digest(old),log,restart:false};await apply(config);assert.deepEqual(await fs.readFile(target),good);assert.deepEqual(await fs.readFile(target+'.previous'),old);
   await fs.writeFile(target,old);await fs.writeFile(staged,Buffer.alloc(good.length));await assert.rejects(()=>apply(config));assert.deepEqual(await fs.readFile(target),old,'Corrupt payload must preserve installed app');
-  console.log('PASS: signed updates, tamper refusal, package integrity, version ordering, mirror fallback, settings persistence, automatic startup check, cancellation, offline editing and atomic replacement backup');
+  // GUI restarts must not inherit the background helper's hidden-window flag or Node mode.
+  const vm=require('node:vm'),{EventEmitter}=require('node:events');let launch;
+  const sandbox={module:{exports:{}},process:{env:{ELECTRON_RUN_AS_NODE:'1',KEEP:'yes'}},Buffer,setTimeout,require:spec=>spec==='node:child_process'?{spawn:(file,args,options)=>{launch={file,args,options};const child=new EventEmitter();child.pid=123;child.unref=()=>{};queueMicrotask(()=>child.emit('spawn'));return child;}}:require(spec)};
+  vm.runInNewContext(await fs.readFile(path.join(__dirname,'../desktop/update-helper.cjs'),'utf8'),sandbox);await sandbox.module.exports.restartApp(exe);assert.equal(launch.options.windowsHide,false);assert.equal(launch.options.cwd,path.dirname(exe));assert(!('ELECTRON_RUN_AS_NODE' in launch.options.env));assert.equal(launch.options.env.KEEP,'yes');
+  console.log('PASS: signed updates, tamper refusal, package integrity, version ordering, mirror fallback, settings persistence, automatic startup check, cancellation, offline editing and atomic replacement backup and visible GUI restart environment');
  }finally{await fs.rm(dir,{recursive:true,force:true});}
 })();
 if(require.main===module)module.exports.catch(error=>{console.error(error);process.exitCode=1;});
