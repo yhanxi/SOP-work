@@ -18,7 +18,7 @@ files={
  'build/icon.ico':(root/'build/icon.ico').read_bytes(),
  'renderer/assets.js':(root/'blank-assets.js').read_bytes()
 }
-for name in ['index.html','style.css','app.js','desktop-updates.js','project-storage.js','native-import.js','template-v2.js','object-workspace.js','native-shapes.js','word.js','vendor/jszip.min.js','vendor/JSZip-LICENSE.md']:
+for name in ['index.html','style.css','app.js','desktop-updates.js','project-storage.js','native-import.js','template-v2.js','object-workspace.js','color-picker.js','workspace-controls.css','native-shapes.js','word.js','vendor/jszip.min.js','vendor/JSZip-LICENSE.md']:
     files['renderer/'+name]=(source/name).read_bytes()
 header={'files':{}};offset=0
 for name,data in sorted(files.items()):

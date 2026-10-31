@@ -21,6 +21,7 @@ const JSZip=require(path.join(source,'vendor/jszip.min.js'));
  assert(!Object.keys(zip.files).some(n=>n.startsWith('customXml/')),'Reference custom XML must not be shipped');
  const html=fs.readFileSync(path.join(source,'index.html'),'utf8');
  assert(html.indexOf('src="native-import.js"')<html.indexOf('src="app.js"'),'Native import must load before restoring saved projects');
+ const packager=fs.readFileSync(path.join(root,'desktop/package-app.py'),'utf8');for(const match of html.matchAll(/(?:src|href)="([^"]+)"/g)){const reference=match[1];if(!reference.startsWith('data:'))assert((packager.includes("'"+reference+"'")||packager.includes("'renderer/"+reference+"'")),'Desktop packager omits '+reference);}
  for(const name of files)assert(html.includes(`src="${name}"`),'Missing renderer script '+name);
  assert(!fs.existsSync(path.join(source,'原稿整理项目.sop.json')),'Private sample must remain outside the repository');
  console.log('PASS: source syntax, generic assets, template privacy and renderer wiring');
