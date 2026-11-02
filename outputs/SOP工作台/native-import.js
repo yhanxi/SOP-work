@@ -3,7 +3,7 @@
 'use strict';
 const W='http://schemas.openxmlformats.org/wordprocessingml/2006/main',R='http://schemas.openxmlformats.org/officeDocument/2006/relationships',A='http://schemas.openxmlformats.org/drawingml/2006/main';
 const parse=s=>new DOMParser().parseFromString(s,'application/xml'),serialize=n=>new XMLSerializer().serializeToString(n),kids=(n,name)=>[...n.children].filter(c=>c.localName===name),one=(n,name)=>kids(n,name)[0],val=(n,name)=>n?.getAttributeNS(W,name)||'',esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const signature=p=>JSON.stringify([p.steps,p.requirements,p.photos.map(ph=>[ph.data,ph.caption,ph.marks]),...(p.textStyles?[p.textStyles]:[])]);
+const signature=p=>JSON.stringify([p.steps,p.requirements,p.photos.map(ph=>[ph.data,ph.caption,ph.marks]),...(p.textStyles?[p.textStyles]:[]),...(p.contentStyle?[p.contentStyle]:[])]);
 const active=p=>!p.canvas&&p.importedContent?.signature===signature(p);
 function resolve(target){const parts=['word'];for(const s of target.replace(/^\//,'').split('/')){if(s==='..')parts.pop();else if(s!=='.'&&s)parts.push(s);}return target.startsWith('/')?target.slice(1):parts.join('/');}
 function branch(n){if(n.namespaceURI==='http://schemas.openxmlformats.org/markup-compatibility/2006'&&n.localName==='AlternateContent')return one(n,'Choice')||one(n,'Fallback');return null;}
