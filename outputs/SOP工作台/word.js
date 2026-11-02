@@ -20,24 +20,13 @@ function fromBase64(s){return new TextDecoder().decode(Uint8Array.from(atob(s),c
 async function hashText(s){const bytes=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(s));return [...new Uint8Array(bytes)].map(x=>x.toString(16).padStart(2,'0')).join('');}
 async function imageSize(data){return new Promise((resolve,reject)=>{const im=new Image();im.onload=()=>resolve([im.naturalWidth,im.naturalHeight]);im.onerror=reject;im.src=data;});}
 
-function scaleOperation(c,scale){
- if(!(scale<1))return;
- for(const n of desc(c,'sz').concat(desc(c,'szCs'))){const value=Number(n.getAttributeNS(W,'val'));if(value)n.setAttributeNS(W,'w:val',Math.max(2,Math.round(value*scale)));}
- for(const n of desc(c,'spacing'))for(const key of ['val','before','after',...(n.getAttributeNS(W,'lineRule')==='auto'?[]:['line'])]){const value=n.getAttributeNS(W,key);if(value)n.setAttributeNS(W,'w:'+key,Math.round(Number(value)*scale));}
- for(const n of c.getElementsByTagName('*')){
-  if(['extent','ext','off'].includes(n.localName))for(const key of ['cx','cy','x','y'])if(n.hasAttribute(key))n.setAttribute(key,Math.round(Number(n.getAttribute(key))*scale));
-  if(n.localName==='posOffset')n.textContent=Math.round(Number(n.textContent)*scale);
-  for(const key of ['distT','distB','distL','distR','lIns','rIns','tIns','bIns'])if(n.hasAttribute(key))n.setAttribute(key,Math.round(Number(n.getAttribute(key))*scale));
-  if(n.namespaceURI==='urn:schemas-microsoft-com:vml'&&n.hasAttribute('style'))n.setAttribute('style',n.getAttribute('style').replace(/(-?[\d.]+)pt/g,(_,v)=>Number(v)*scale+'pt'));
- }
-}
 async function exportDocx(project,layout,front){
  const wide=window.SOP_ASSETS.layout==='wide-v2',contentWidth=wide?495.4:367.45;
  if(!layout.length&&!front.length)throw Error('请先添加至少一张页面。');
 
  // An untouched original keeps its own tables, section geometry, styles and drawing anchors.
  // Rebuilding those paragraphs inside a different table changes Word's physical pagination.
- if(project.nativeWord?.documentXml&&project.nativeWord.projectState===window.SOP_IMPORT.projectState(project)){
+ if(!layout.some(p=>p.manualSinglePage)&&project.nativeWord?.documentXml&&project.nativeWord.projectState===window.SOP_IMPORT.projectState(project)){
   const z=new JSZip();for(const [name,data]of Object.entries(project.nativeWord.files))z.file(name,data,{base64:true});
   let documentXML=project.nativeWord.documentXml;if(wide){const original=xml(documentXML);for(const t of desc(original,'tbl')){const rows=children(t,'tr');if(rows.length<17||cells(rows[2]).length!==2||!txt(rows[2]).includes('工序作业内容'))continue;for(const [r,c]of [[0,1],[0,3],[1,3],[14,1],[14,2],[16,1],[16,2],[16,3],[16,4]])if(cells(rows[r])[c])centerExisting(cells(rows[r])[c]);for(const r of desc(cells(rows[0])[1],'r')){let pr=first(r,'rPr');if(!pr){pr=el(original,'rPr');r.prepend(pr);}for(const key of ['sz','szCs']){let size=first(pr,key);if(!size){size=el(original,key);pr.append(size);}size.setAttributeNS(W,'w:val',28);}}for(const row of rows.slice(4,12))for(const c of cells(row).slice(1))centerExisting(c);}documentXML=serialize(original);} z.file('word/document.xml',documentXML);
   const rels=xml(await z.file('word/_rels/document.xml.rels').async('string')),ct=xml(project.nativeWord.types),embedded=xml('<sop-project xmlns="urn:lenfor:sop:project"/>');
@@ -93,12 +82,14 @@ async function exportDocx(project,layout,front){
   if(p.requirements.trim()||wide){op.append(para(d,'二、工艺技术要求：',24));for(const line of p.requirements.split('\n').filter(s=>s.trim()))op.append(bodyParagraph(d,line,p,'requirements'));}
   if(p.standardText)op.append(para(d,p.standardText,20));if(!children(op,'p').length)op.append(para(d,''));
   }
-  if(p.fitSinglePage){if(window.SOP_IMPORT.active(p)){for(const r of desc(op,'r')){let pr=first(r,'rPr');if(!pr){pr=el(d,'rPr');r.prepend(pr);}if(!first(pr,'sz'))pr.append(el(d,'sz',{val:24}));}for(const paragraph of desc(op,'p')){let pr=first(paragraph,'pPr');if(!pr){pr=el(d,'pPr');paragraph.prepend(pr);}for(const old of children(pr,'snapToGrid'))old.remove();pr.append(el(d,'snapToGrid',{val:0}));}}scaleOperation(op,p.fitScale||1);if(!window.SOP_IMPORT.active(p)&&p.fitScale<1){const shift=contentWidth*(1-p.fitScale)/2*12700;for(const n of op.getElementsByTagNameNS('http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing','positionH')){const offset=[...n.children].find(x=>x.localName==='posOffset');if(offset)offset.textContent=Math.round(Number(offset.textContent)+shift);}}}
-  if(wide){for(let j=0;j<8;j++){const mat=p.materials[j]||{};centerCell(cell(t,4+j,1),mat.name||'',19);centerCell(cell(t,4+j,2),mat.spec||'',19);centerCell(cell(t,4+j,3),mat.qty||'',19);}const frequency=key=>p.checks.map(x=>[x.feature,x.standard,x[key]].filter(Boolean).join('：')).filter(Boolean).join('\n');centerCell(cell(t,14,1),frequency('self'),19);centerCell(cell(t,14,2),frequency('audit'),19);for(const [col,val]of [[1,[signoff.author,signoff.authorDate].filter(Boolean).join('\n')],[2,[signoff.reviewer,signoff.reviewerDate].filter(Boolean).join('\n')],[3,[signoff.approver,signoff.approverDate].filter(Boolean).join('\n')],[4,signoff.version]])centerCell(cell(t,16,col),val,19);}else{
+  if(wide){for(let j=0;j<8;j++){const mat=j===7?Object.fromEntries(['name','spec','qty'].map(k=>[k,p.materials.slice(7).map(m=>m[k]||'').join('\n')])):p.materials[j]||{};centerCell(cell(t,4+j,1),mat.name||'',19);centerCell(cell(t,4+j,2),mat.spec||'',19);centerCell(cell(t,4+j,3),mat.qty||'',19);}const frequency=key=>p.checks.map(x=>[x.feature,x.standard,x[key]].filter(Boolean).join('：')).filter(Boolean).join('\n');centerCell(cell(t,14,1),frequency('self'),19);centerCell(cell(t,14,2),frequency('audit'),19);for(const [col,val]of [[1,[signoff.author,signoff.authorDate].filter(Boolean).join('\n')],[2,[signoff.reviewer,signoff.reviewerDate].filter(Boolean).join('\n')],[3,[signoff.approver,signoff.approverDate].filter(Boolean).join('\n')],[4,signoff.version]])centerCell(cell(t,16,col),val,19);}else{
   for(let j=0;j<4;j++){const mat=p.materials[j]||{};setCell(cell(t,4+j,3),mat.name?String(j+1):'',17);setCell(cell(t,4+j,4),mat.name||'',17);setCell(cell(t,4+j,5),mat.spec||'',17);setCell(cell(t,4+j,6),mat.qty||'',17);}
   for(let j=0;j<2;j++){const check=p.checks[j]||{},values=[check.feature?String(j+1):'',check.feature||'',check.standard||'',check.self||'',check.audit||'',check.importance||'',check.method||''];values.forEach((v,k)=>setCell(cell(t,10+j,3+k),v,17));}
   setCell(cell(t,12,3),'备注：'+p.notes,17);setCell(cell(t,13,3),project.settings.importance,17);setCell(cell(t,14,3),project.settings.management,17);setCell(cell(t,14,0),p.duration,19);setCell(cell(t,14,1),p.people,19);for(const [col,val]of [[5,[signoff.author,signoff.authorDate].filter(Boolean).join('\n')],[6,[signoff.reviewer,signoff.reviewerDate].filter(Boolean).join('\n')],[7,[signoff.approver,signoff.approverDate].filter(Boolean).join('\n')],[8,signoff.version]])setCell(cell(t,16,col),val,19);
 }
+  // A fixed template row may clip overflowing content, but must never expand or split onto another page.
+  for(const row of children(t,'tr')){let pr=first(row,'trPr');if(!pr){pr=el(d,'trPr');row.prepend(pr);}if(!first(pr,'cantSplit'))pr.append(el(d,'cantSplit'));const height=first(pr,'trHeight');if(height)height.setAttributeNS(W,'w:hRule','exact');}
+  for(const pp of desc(t,'pPr'))for(const tag of ['keepNext','keepLines','pageBreakBefore'])for(const n of children(pp,tag))n.remove();
   body.append(t,separator(i<layout.length-1));groups.push({key:'body:'+p.sourceId+':'+p.fragment,nodes:[...body.childNodes].slice(begin),number:p.pageNo});
  }
  const map=new Map(groups.map(g=>[g.key,g])),ordered=[];for(const key of project.pageOrder||[]){if(map.has(key)){ordered.push(map.get(key));map.delete(key);}}for(const group of groups)if(map.has(group.key)){ordered.push(group);map.delete(group.key);}body.replaceChildren();for(let i=0;i<ordered.length;i++){const group=ordered[i];body.append(...group.nodes.slice(0,-1));if(i<ordered.length-1)body.append(sectionBreak(group.number,group.key.startsWith('body:')));}const end=section.cloneNode(true);for(const n of children(end,'pgNumType'))n.remove();end.append(el(d,'pgNumType',{start:ordered.at(-1)?.number||1}));if(wide){for(const ref of children(end,'headerReference'))ref.remove();const ref=el(d,'headerReference',{type:'default'});ref.setAttributeNS(R,'r:id',ordered.at(-1)?.key.startsWith('body:')?'rIdSopHeader':frontHeaderId);end.append(ref);}body.append(separator(false),end);

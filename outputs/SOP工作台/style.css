@@ -37,3 +37,5 @@
 .signoff-fields{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:10px}.signoff-fields label>span{font-size:12px;color:var(--muted)}
 
 .cover-top>div:last-child{font-size:16pt;text-align:center;justify-content:center}.flow-title{font-size:13pt}.flow-note{font-size:9.5pt;white-space:pre-wrap}
+
+.wide-materials .fixed-cell-content{height:10.79mm;white-space:pre-wrap;overflow:visible}
