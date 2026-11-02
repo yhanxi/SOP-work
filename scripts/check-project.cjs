@@ -8,6 +8,7 @@ for(const file of [...files.map(f=>path.join(source,f)),...['desktop/updater.cjs
 require('../tests/object-model.cjs');
 require('../tests/canvas-controls.cjs');
 require('../tests/canvas-snapping.cjs');
+require('../tests/canvas-connections.cjs');
 const data=fs.readFileSync(path.join(source,'assets.js'),'utf8'),assets=JSON.parse(data.slice(data.indexOf('=')+1).replace(/;\s*$/,''));
 assert.equal(assets.seed.schema,'sop-studio/v1');assert.equal(assets.seed.settings.company,'');assert.equal(assets.seed.settings.logo,'');assert.equal(assets.seed.pages.length,1);assert.equal(assets.seed.pages[0].photos.length,0);
 assert.equal(fs.readFileSync(path.join(root,'desktop/blank-assets.js'),'utf8'),data,'Web and desktop generic assets must match');

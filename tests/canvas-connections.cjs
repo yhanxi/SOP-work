@@ -1,0 +1,11 @@
+const assert=require('node:assert/strict'),O=require('../outputs/SOP工作台/object-workspace.js');
+const m=O.normalize({objects:[{id:'a',type:'arrow',x:0,y:0,w:50,h:20},{id:'b',type:'line',x:100,y:100,w:100,h:0},{id:'r',type:'rect',x:300,y:100,w:100,h:100}],edges:[]});
+const [a,b,r]=m.objects;
+O.attachEndpoint(m,a,'end',{targetId:'b',anchorIndex:2});O.attachEndpoint(m,b,'end',{targetId:'r',anchorIndex:2});O.syncConnections(m);assert.equal(O.lineEndpoints(a).x2,250);r.x+=100;O.syncConnections(m);assert.equal(O.lineEndpoints(a).x2,300);
+O.attachEndpoint(m,b,'start',{targetId:'a',anchorIndex:0});assert(!b.attachments.start,'Reject circular dependency');
+const back=O.normalize(JSON.parse(JSON.stringify(m)));assert.deepEqual(back.objects[0].attachments,a.attachments);
+const copied=O.duplicate(m,'a');assert(!m.objects.find(o=>o.id===copied).attachments,'A copy remains at its offset instead of snapping back');
+const old=O.lineEndpoints(b);O.remove(m,'r');assert(!b.attachments);assert.deepEqual(O.lineEndpoints(b),old);
+a.attachments={start:{targetId:'missing',anchorIndex:0},end:{targetId:'b',anchorIndex:99}};O.syncConnections(m);assert(!a.attachments,'Discard deleted or invalid anchors');
+a.attachments={end:{targetId:'b',anchorIndex:0}};b.attachments={end:{targetId:'a',anchorIndex:0}};const safe=O.normalize(m);assert(!(safe.objects[0].attachments?.end&&safe.objects[1].attachments?.end),'Sanitize legacy/corrupt cycles');
+console.log('PASS: anchor dependency chains, cycle refusal, persisted bindings, duplicate/delete and invalid-anchor recovery');

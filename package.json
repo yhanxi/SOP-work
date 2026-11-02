@@ -15,6 +15,7 @@
     "test:canvas": "node tests/canvas-snapping-browser.cjs",
     "test:storage": "node tests/project-storage-browser.cjs",
     "test:drawing": "node tests/canvas-drawing-browser.cjs",
-    "test:text-format": "node tests/text-format-browser.cjs"
+    "test:text-format": "node tests/text-format-browser.cjs",
+    "test:connections": "node tests/canvas-connections-browser.cjs"
   }
 }
