@@ -39,3 +39,5 @@
 .cover-top>div:last-child{font-size:16pt;text-align:center;justify-content:center}.flow-title{font-size:13pt}.flow-note{font-size:9.5pt;white-space:pre-wrap}
 
 .wide-materials .fixed-cell-content{height:10.79mm;white-space:pre-wrap;overflow:visible}
+
+.op-text-section{display:flow-root}.manual-op-layout>.page-object-content{flex:none}
