@@ -135,3 +135,7 @@ button.sop-color-swatch:hover,button.sop-color-swatch[aria-pressed=true]{outline
 @media(max-width:480px){#updateDialog .update-header,#updateDialog .update-body{padding:16px}#updateDialog .update-footer{padding:12px 16px}}
 
 .object-stage:focus{outline:none}.object-stage:focus-visible{box-shadow:inset 0 0 0 1px #b1d5d3}
+
+.object-tools [aria-pressed="true"]{background:#dcefed;border-color:#2d6872;color:#214f57}
+
+.text-format-controls{display:flex;gap:10px;margin:0 0 8px}.text-format-controls label{display:flex;align-items:center;gap:6px;white-space:nowrap;font-size:12px;color:var(--muted)}.text-format-controls input{width:58px;padding:5px 7px;font-size:12px}.text-format-controls input:disabled{background:#f3f5f6;color:#667680}
