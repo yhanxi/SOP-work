@@ -88,6 +88,7 @@ async function exportDocx(project,layout,front){
   for(let j=0;j<2;j++){const check=p.checks[j]||{},values=[check.feature?String(j+1):'',check.feature||'',check.standard||'',check.self||'',check.audit||'',check.importance||'',check.method||''];values.forEach((v,k)=>setCell(cell(t,10+j,3+k),v,17));}
   setCell(cell(t,12,3),'备注：'+p.notes,17);setCell(cell(t,13,3),project.settings.importance,17);setCell(cell(t,14,3),project.settings.management,17);setCell(cell(t,14,0),p.duration,19);setCell(cell(t,14,1),p.people,19);for(const [col,val]of [[5,[signoff.author,signoff.authorDate].filter(Boolean).join('\n')],[6,[signoff.reviewer,signoff.reviewerDate].filter(Boolean).join('\n')],[7,[signoff.approver,signoff.approverDate].filter(Boolean).join('\n')],[8,signoff.version]])setCell(cell(t,16,col),val,19);
 }
+  if(wide)for(const row of children(t,'tr').slice(2))for(const c of cells(row).slice(1))centerExisting(c);
   // A fixed template row may clip overflowing content, but must never expand or split onto another page.
   for(const row of children(t,'tr')){let pr=first(row,'trPr');if(!pr){pr=el(d,'trPr');row.prepend(pr);}if(!first(pr,'cantSplit'))pr.append(el(d,'cantSplit'));const height=first(pr,'trHeight');if(height)height.setAttributeNS(W,'w:hRule','exact');}
   for(const pp of desc(t,'pPr'))for(const tag of ['keepNext','keepLines','pageBreakBefore'])for(const n of children(pp,tag))n.remove();
