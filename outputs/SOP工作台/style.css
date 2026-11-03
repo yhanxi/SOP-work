@@ -43,3 +43,11 @@
 .op-text-section{display:flow-root}.manual-op-layout>.page-object-content{flex:none}
 
 .wide-materials .fixed-cell-content{display:flex;align-items:center;justify-content:center;text-align:center}.wide-frequency-title{display:flex;align-items:center;justify-content:center}
+
+/* Divide the fixed right column once; padding and collapsed borders stay within that height. */
+.wide-right{display:grid;grid-template-rows:minmax(0,109.71fr) minmax(0,7.94fr) minmax(0,19.41fr) minmax(0,25.58fr);min-height:0;overflow:hidden}
+.wide-right>table{height:100%}.wide-frequency-title{height:auto;min-height:0}
+.wide-materials tr:first-child{height:6.745%}.wide-materials tr:not(:first-child){height:11.657%}
+.wide-materials .fixed-cell-content{height:calc(12.79mm - 2mm - 1pt)}
+.wide-frequency tr:first-child{height:40.91%}.wide-frequency tr:last-child{height:59.09%}
+.wide-sign tr:first-child{height:44.84%}.wide-sign tr:last-child{height:55.16%}
