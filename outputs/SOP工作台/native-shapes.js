@@ -37,9 +37,20 @@ function create(doc,{nextId,paragraph}){
   return result;
  }
  function flowParagraph(project,chunk=0){
-  if(project.frontContent?.flowGraph){const m=window.SOP_OBJECTS.normalize(project.frontContent.flowGraph),p=paragraph(doc,' ',2),pr=[...p.children].find(e=>e.localName==='pPr'),spacing=[...pr.children].find(e=>e.localName==='spacing'),sx=Math.min(740/m.width,410/m.height),sy=sx;spacing.setAttributeNS(W,'w:line',String(Math.round(m.height*sy*20)));spacing.setAttributeNS(W,'w:lineRule','exact');spacing.setAttributeNS(W,'w:after','0');
-   for(const e of m.edges){const q=window.SOP_OBJECTS.edgePoints(m,e);if(!q)continue;p.append(line('流程连接 '+e.id,q.x1*sx,q.y1*sy,q.x2*sx,q.y2*sy,{arrow:true,width:e.strokeWidth*sy,color:e.color.slice(1)}));if(e.label)p.append(nativeShape({name:'分支标签 '+e.id,x:(q.x1+q.x2)/2*sx-30,y:(q.y1+q.y2)/2*sy-14,width:60,height:15,text:e.label,textColor:e.color.slice(1),stroke:null,fill:'FFFFFF',fontSize:9}));}
-   for(const o of m.objects)p.append(nativeShape({name:'流程节点 '+o.id,x:o.x*sx,y:o.y*sy,width:o.w*sx,height:o.h*sy,geometry:({text:'rect',ellipse:'ellipse',diamond:'diamond',arrow:'line',line:'line'})[o.type]||'rect',text:['line','arrow'].includes(o.type)?undefined:window.SOP_OBJECTS.wrapText(o.text,o.w,o.fontSize).join('\n'),lineWidth:o.strokeWidth*sy,stroke:o.type==='text'?null:o.color.slice(1),fill:o.fill==='transparent'?null:o.fill.slice(1),fontSize:o.fontSize*sy,textColor:o.color.slice(1),arrow:o.type==='arrow',flipH:!!o.flipX,flipV:!!o.flipY,connector:['line','arrow'].includes(o.type)}));return p;
+  if(project.frontContent?.flowGraph){const m=window.SOP_OBJECTS.resolvedFlow(project.frontContent.flowGraph,project.pages),p=paragraph(doc,' ',2),pr=[...p.children].find(e=>e.localName==='pPr'),spacing=[...pr.children].find(e=>e.localName==='spacing'),sx=Math.min(740/m.width,410/m.height),sy=sx;spacing.setAttributeNS(W,'w:line',String(Math.round(m.height*sy*20)));spacing.setAttributeNS(W,'w:lineRule','exact');spacing.setAttributeNS(W,'w:after','0');
+   for(const e of m.edges){
+    const points=window.SOP_OBJECTS.flowRoute(m,e).filter((v,i,list)=>!i||Math.hypot(v.x-list[i-1].x,v.y-list[i-1].y)>.001);
+    if(points.length<2)continue;
+    for(let i=1;i<points.length;i++){
+     const a=points[i-1],b=points[i];
+     p.append(line('流程连接 '+e.id+' '+i,a.x*sx,a.y*sy,b.x*sx,b.y*sy,{arrow:i===points.length-1,width:e.strokeWidth*sy,color:e.color.slice(1)}));
+    }
+    if(e.label){
+     const label=window.SOP_OBJECTS.flowLabel(points,e,m);
+     p.append(nativeShape({name:'分支标签 '+e.id,x:(label.x-label.width/2)*sx,y:(label.y-label.height/2)*sy,width:label.width*sx,height:label.height*sy,text:e.label,textColor:e.color.slice(1),stroke:null,fontSize:label.fontSize*sy}));
+    }
+   }
+   for(const o of m.objects)p.append(nativeShape({name:'流程节点 '+o.id,x:o.x*sx,y:o.y*sy,width:o.w*sx,height:o.h*sy,geometry:({text:'rect',ellipse:'ellipse',diamond:'diamond',triangle:'triangle',arrow:'line',line:'line'})[o.type]||'rect',text:['line','arrow'].includes(o.type)?undefined:window.SOP_OBJECTS.wrapText(o.text,o.w,o.fontSize).join('\n'),lineWidth:o.strokeWidth*sy,stroke:o.type==='text'?null:o.color.slice(1),fill:o.fill==='transparent'?null:o.fill.slice(1),fontSize:o.fontSize*sy,textColor:o.color.slice(1),arrow:o.type==='arrow',flipH:!!o.flipX,flipV:!!o.flipY,connector:['line','arrow'].includes(o.type)}));return p;
   }
   const seen=new Set(),all=project.frontContent?.flowManual?String(project.frontContent.flowText||'').split('\n').filter(x=>x.trim()).map(name=>({name})):project.pages.filter(p=>{if(seen.has(p.processId))return false;seen.add(p.processId);return true;}),pages=all.slice(chunk*24,chunk*24+24),p=paragraph(doc,' ',2),pr=[...p.children].find(e=>e.localName==='pPr'),spacing=[...pr.children].find(e=>e.localName==='spacing');
   spacing.setAttributeNS(W,'w:line','8200');spacing.setAttributeNS(W,'w:lineRule','exact');spacing.setAttributeNS(W,'w:after','0');

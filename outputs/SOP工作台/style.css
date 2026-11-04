@@ -51,3 +51,19 @@
 .wide-materials .fixed-cell-content{height:calc(12.79mm - 2mm - 1pt)}
 .wide-frequency tr:first-child{height:40.91%}.wide-frequency tr:last-child{height:59.09%}
 .wide-sign tr:first-child{height:44.84%}.wide-sign tr:last-child{height:55.16%}
+
+/* Flow generation uses the existing form dialog and keeps the page preview separate. */
+#formDialog:has(.flow-config){width:min(1080px,96vw)}
+.flow-config{overflow:auto}
+.flow-config-toolbar,.flow-config-order{display:flex;align-items:center;gap:6px}
+.flow-config-toolbar{gap:14px;margin:12px 0}
+.flow-config-toolbar select{width:auto}
+.flow-config table{width:100%;min-width:700px;border-collapse:collapse;font-size:13px}
+.flow-config th,.flow-config td{padding:7px 5px;border-bottom:1px solid #dce6e9;text-align:left}
+.flow-config th{background:#f0f5f6}
+.flow-config td:nth-child(1){width:25%}
+.flow-config td:nth-child(3){width:24%}
+.flow-config td:nth-child(4){width:12%}
+.flow-config select,.flow-config input:not([type=checkbox]){width:100%;min-width:0;padding:6px}
+.flow-config-order button{padding:4px 8px}
+#flowConfigError{color:#a53b32;margin-top:8px}
