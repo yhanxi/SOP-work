@@ -315,7 +315,7 @@ function resolvedFlow(model,pages){
 const flowShapes={rect:'矩形',diamond:'菱形',ellipse:'椭圆',triangle:'三角形'};
 function flowTextWidth(node){
  if(!node.flowFit)return node.w;
- return node.w*({diamond:.56,ellipse:.72,triangle:.40}[node.type]||.93);
+ return node.w*({diamond:.56,ellipse:.72,triangle:.48}[node.type]||.93);
 }
 function generateFlow(rows,columns){
  const main=rows.filter(row=>row.role==='main'),branches=rows.filter(row=>row.role==='branch');
@@ -331,8 +331,10 @@ function generateFlow(rows,columns){
   const o={id:id(),type,text:prefix+row.name,processId:row.processId,prefix,x,y,w,flowFit:true,
    fontSize:type==='diamond'?16:19,fill:'#ffffff',color:'#20262b',strokeWidth:1.6};
   const lines=wrapText(o.text,flowTextWidth(o),o.fontSize).length;
-  const fraction={diamond:.40,ellipse:.62,triangle:.32}[type]||1;
-  o.h=Math.max(minimum,Math.ceil((lines*o.fontSize*1.25+14)/fraction));
+  const fraction={diamond:.40,ellipse:.62}[type]||1;
+  // The lower half is the text area of the triangle preset.
+  const textHeight=type==='triangle'?(lines*o.fontSize*1.2+6)/.5:(lines*o.fontSize*1.25+14)/fraction;
+  o.h=Math.max(minimum,Math.ceil(textHeight));
   return o;
  };
  const edge=(from,to,route,label='')=>({id:id(),from:from.id,to:to?.id,route,label,color:'#20262b',strokeWidth:1.8});

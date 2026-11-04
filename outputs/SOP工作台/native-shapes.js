@@ -36,8 +36,21 @@ function create(doc,{nextId,paragraph}){
   }
   return result;
  }
- function flowParagraph(project,chunk=0){
-  if(project.frontContent?.flowGraph){const m=window.SOP_OBJECTS.resolvedFlow(project.frontContent.flowGraph,project.pages),p=paragraph(doc,' ',2),pr=[...p.children].find(e=>e.localName==='pPr'),spacing=[...pr.children].find(e=>e.localName==='spacing'),sx=Math.min(740/m.width,410/m.height),sy=sx;spacing.setAttributeNS(W,'w:line',String(Math.round(m.height*sy*20)));spacing.setAttributeNS(W,'w:lineRule','exact');spacing.setAttributeNS(W,'w:after','0');
+ function centerFlow(p,width,height){
+  const drawings=[...p.getElementsByTagNameNS(WP,'anchor')].map(anchor=>{
+   const [x,y]=anchor.getElementsByTagNameNS(WP,'posOffset');
+   const size=anchor.getElementsByTagNameNS(WP,'extent')[0];
+   return {x,y,left:Number(x.textContent),top:Number(y.textContent),w:Number(size.getAttribute('cx')),h:Number(size.getAttribute('cy'))};
+  });
+  if(!drawings.length)return p;
+  const left=Math.min(...drawings.map(o=>o.left)),top=Math.min(...drawings.map(o=>o.top));
+  const right=Math.max(...drawings.map(o=>o.left+o.w)),bottom=Math.max(...drawings.map(o=>o.top+o.h));
+  const dx=Math.round((emu(width)-left-right)/2),dy=Math.round((emu(height)-top-bottom)/2);
+  for(const o of drawings){o.x.textContent=String(o.left+dx);o.y.textContent=String(o.top+dy);}
+  return p;
+ }
+ function flowParagraph(project,chunk=0,{width=740,height=410}={}){
+  if(project.frontContent?.flowGraph){const m=window.SOP_OBJECTS.resolvedFlow(project.frontContent.flowGraph,project.pages),p=paragraph(doc,' ',2),pr=[...p.children].find(e=>e.localName==='pPr'),spacing=[...pr.children].find(e=>e.localName==='spacing'),sx=Math.min(width/m.width,height/m.height),sy=sx;spacing.setAttributeNS(W,'w:line',String(Math.round(m.height*sy*20)));spacing.setAttributeNS(W,'w:lineRule','exact');spacing.setAttributeNS(W,'w:after','0');
    for(const e of m.edges){
     const points=window.SOP_OBJECTS.flowRoute(m,e).filter((v,i,list)=>!i||Math.hypot(v.x-list[i-1].x,v.y-list[i-1].y)>.001);
     if(points.length<2)continue;
@@ -50,16 +63,16 @@ function create(doc,{nextId,paragraph}){
      p.append(nativeShape({name:'分支标签 '+e.id,x:(label.x-label.width/2)*sx,y:(label.y-label.height/2)*sy,width:label.width*sx,height:label.height*sy,text:e.label,textColor:e.color.slice(1),stroke:null,fontSize:label.fontSize*sy}));
     }
    }
-   for(const o of m.objects)p.append(nativeShape({name:'流程节点 '+o.id,x:o.x*sx,y:o.y*sy,width:o.w*sx,height:o.h*sy,geometry:({text:'rect',ellipse:'ellipse',diamond:'diamond',triangle:'triangle',arrow:'line',line:'line'})[o.type]||'rect',text:['line','arrow'].includes(o.type)?undefined:window.SOP_OBJECTS.wrapText(o.text,window.SOP_OBJECTS.flowTextWidth(o),o.fontSize).join('\n'),lineWidth:o.strokeWidth*sy,stroke:o.type==='text'?null:o.color.slice(1),fill:o.fill==='transparent'?null:o.fill.slice(1),fontSize:o.fontSize*sy,textColor:o.color.slice(1),arrow:o.type==='arrow',flipH:!!o.flipX,flipV:!!o.flipY,connector:['line','arrow'].includes(o.type)}));return p;
+   for(const o of m.objects)p.append(nativeShape({name:'流程节点 '+o.id,x:o.x*sx,y:o.y*sy,width:o.w*sx,height:o.h*sy,geometry:({text:'rect',ellipse:'ellipse',diamond:'diamond',triangle:'triangle',arrow:'line',line:'line'})[o.type]||'rect',text:['line','arrow'].includes(o.type)?undefined:window.SOP_OBJECTS.wrapText(o.text,window.SOP_OBJECTS.flowTextWidth(o),o.fontSize).join('\n'),lineWidth:o.strokeWidth*sy,stroke:o.type==='text'?null:o.color.slice(1),fill:o.fill==='transparent'?null:o.fill.slice(1),fontSize:o.fontSize*sy,textColor:o.color.slice(1),arrow:o.type==='arrow',flipH:!!o.flipX,flipV:!!o.flipY,connector:['line','arrow'].includes(o.type)}));return centerFlow(p,width,height);
   }
   const seen=new Set(),all=project.frontContent?.flowManual?String(project.frontContent.flowText||'').split('\n').filter(x=>x.trim()).map(name=>({name})):project.pages.filter(p=>{if(seen.has(p.processId))return false;seen.add(p.processId);return true;}),pages=all.slice(chunk*24,chunk*24+24),p=paragraph(doc,' ',2),pr=[...p.children].find(e=>e.localName==='pPr'),spacing=[...pr.children].find(e=>e.localName==='spacing');
-  spacing.setAttributeNS(W,'w:line','8200');spacing.setAttributeNS(W,'w:lineRule','exact');spacing.setAttributeNS(W,'w:after','0');
-  const sx=740/1500,sy=410/850;
+  spacing.setAttributeNS(W,'w:line',String(Math.round(height*20)));spacing.setAttributeNS(W,'w:lineRule','exact');spacing.setAttributeNS(W,'w:after','0');
+  const sx=Math.min(width/1500,height/850),sy=sx;
   pages.forEach((page,i)=>{
    const col=Math.floor(i/8),row=i%8,x=45+col*460,y=35+row*96;
    p.append(nativeShape({name:'流程节点 '+(chunk*24+i+1),x:x*sx,y:y*sy,width:380*sx,height:58*sy,text:(chunk*24+i+1)+'. '+page.name,fill:'FFFFFF',fontSize:10.5}));
    if(i<pages.length-1){const points=row===7?[[x+380,y+29],[x+430,y+29],[x+430,64],[x+460,64]]:[[x+190,y+58],[x+190,y+96]];for(let j=0;j<points.length-1;j++)p.append(line('流程连线 '+(chunk*24+i+1)+'.'+(j+1),points[j][0]*sx,points[j][1]*sy,points[j+1][0]*sx,points[j+1][1]*sy,{arrow:j===points.length-2}));}
-  });return p;
+  });return centerFlow(p,width,height);
  }
  return {nativeShape,photoMarks,flowParagraph};
 }

@@ -66,6 +66,10 @@ async function main(){
     {key:'other',role:'branch',target:'last',name:'检查电机线束和太阳轮预装位置'}
    ];
    const graph=SOP_OBJECTS.generateFlow(rows,1),host=document.createElement('div');
+   const triangles=SOP_OBJECTS.generateFlow([
+    {key:'short',role:'main',shape:'triangle',name:'包装'},
+    {key:'long',role:'main',shape:'triangle',name:'包装完成后检查产品编号与外箱标签'}
+   ],1).objects;
    graph.objects.push({id:'legacy-triangle',type:'triangle',text:'包装',x:430,y:20,w:160,h:58,fontSize:19});
    host.innerHTML=SOP_OBJECTS.svg(graph);
    document.body.append(host);
@@ -75,7 +79,8 @@ async function main(){
    host.remove();
    return prep.h>54&&bounds.y>=4&&bounds.y+bounds.height<=prep.h-4
     &&prep.y+prep.h<other.y&&other.y+other.h<last.y
-    &&triangle.y+triangle.height/2>58*.63&&triangle.y+triangle.height<58;
+    &&triangle.y+triangle.height/2>58*.63&&triangle.y+triangle.height<58
+    &&triangles[0].h/triangles[0].w<.30&&triangles[1].h>triangles[0].h;
   });
   assert(longNames,'Long branch text must stay inside its box with room for the next branch');
   if(process.env.SOP_FLOW_QA_OUTPUT)await page.locator('#previewStage').screenshot({path:path.join(process.env.SOP_FLOW_QA_OUTPUT,'preview.png')});
@@ -167,15 +172,36 @@ async function main(){
   await canvas.getByRole('button',{name:'保存画布'}).click();
   const roundTrip=await page.evaluate(async()=>{
    const p=SOP.project;p.pages.find(page=>page.name==='安装光电传感器').name='安装传感器新版';
+   p.settings.history=true;
+   p.history=[{date:'2026-11-04',number:'QA-001',version:'A/1',summary:'居中验证',author:'编制',reviewer:'审核',approver:'批准'}];
    SOP.refresh();
    const blob=await SOP_WORD.exportDocx(p,SOP.layout,SOP.front),bytes=await blob.arrayBuffer();
    const zip=await JSZip.loadAsync(bytes),xml=await zip.file('word/document.xml').async('string');
+   const doc=new DOMParser().parseFromString(xml,'application/xml');
+   const W='http://schemas.openxmlformats.org/wordprocessingml/2006/main',WP='http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing';
+   const tables=[...doc.getElementsByTagNameNS(W,'tbl')];
+   const history=tables.find(t=>t.textContent.includes('居中验证'));
+   const historyCentered=[...history.getElementsByTagNameNS(W,'tr')].slice(1).every(row=>[...row.getElementsByTagNameNS(W,'tc')].every(c=>
+    c.getElementsByTagNameNS(W,'jc')[0]?.getAttributeNS(W,'val')==='center'&&c.getElementsByTagNameNS(W,'vAlign')[0]?.getAttributeNS(W,'val')==='center'));
+   const flow=tables.find(t=>t.textContent.includes('工艺流程图')),body=flow.getElementsByTagNameNS(W,'tr')[1];
+   const bounds=[...body.getElementsByTagNameNS(WP,'anchor')].map(anchor=>{
+    const [x,y]=[...anchor.getElementsByTagNameNS(WP,'posOffset')].map(n=>Number(n.textContent));
+    const ext=anchor.getElementsByTagNameNS(WP,'extent')[0];
+    return [x,y,x+Number(ext.getAttribute('cx')),y+Number(ext.getAttribute('cy'))];
+   });
+   const cellWidth=Number(body.getElementsByTagNameNS(W,'tcW')[0].getAttributeNS(W,'w'));
+   const margins=flow.getElementsByTagNameNS(W,'tblCellMar')[0];
+   const inner=axis=>Number(margins.getElementsByTagNameNS(W,axis)[0].getAttributeNS(W,'w'));
+   const cellHeight=Number(body.getElementsByTagNameNS(W,'trHeight')[0].getAttributeNS(W,'val'));
+   const flowCentered=bounds.length>0&&[cellWidth-inner('left')-inner('right'),cellHeight-inner('top')-inner('bottom')].every((span,axis)=>
+    Math.abs(Math.min(...bounds.map(b=>b[axis]))+Math.max(...bounds.map(b=>b[axis+2]))-span*635)<=1);
    const imported=await SOP_WORD.importDocx(bytes);
-   return {renamed:xml.includes('安装传感器新版'),shapes:(xml.match(/name="流程连接 /g)||[]).length,
+   return {historyCentered,flowCentered,renamed:xml.includes('安装传感器新版'),shapes:(xml.match(/name="流程连接 /g)||[]).length,
     geometry:['triangle','diamond','ellipse'].every(type=>xml.includes('prst="'+type+'"')),same:JSON.stringify(imported.frontContent.flowGraph)===JSON.stringify(p.frontContent.flowGraph),
     flowSetup:imported.frontContent.flowSetup.rows.length,bytes: Array.from(new Uint8Array(bytes))};
   });
   assert(roundTrip.renamed&&roundTrip.geometry&&roundTrip.same);
+  assert(roundTrip.historyCentered&&roundTrip.flowCentered);
   assert(roundTrip.shapes>21);assert.equal(roundTrip.flowSetup,22);
   if(process.env.SOP_FLOW_QA_OUTPUT)require('node:fs').writeFileSync(path.join(process.env.SOP_FLOW_QA_OUTPUT,'flow.docx'),Buffer.from(roundTrip.bytes));
   await page.evaluate(()=>{
