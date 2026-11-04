@@ -313,6 +313,10 @@ function resolvedFlow(model,pages){
  return m;
 }
 const flowShapes={rect:'矩形',diamond:'菱形',ellipse:'椭圆',triangle:'三角形'};
+function flowTextWidth(node){
+ if(!node.flowFit)return node.w;
+ return node.w*({diamond:.56,ellipse:.72,triangle:.40}[node.type]||.93);
+}
 function generateFlow(rows,columns){
  const main=rows.filter(row=>row.role==='main'),branches=rows.filter(row=>row.role==='branch');
  if(!main.length)throw Error('请至少保留一道主工序。');
@@ -322,12 +326,16 @@ function generateFlow(rows,columns){
  const groups=Array.from({length:count},(_,i)=>main.slice(Math.ceil(i*main.length/count),Math.ceil((i+1)*main.length/count)));
  const hasRail=branches.length>0,step=hasRail?420:310,margin=hasRail?154:25;
  const m={width:Math.max(680,count*step+12),height:0,objects:[],edges:[]};
- const node=(row,x,y,w,h,prefix)=>({
-  id:id(),type:Object.hasOwn(flowShapes,row.shape)?row.shape:'rect',text:prefix+row.name,
-  processId:row.processId,prefix,x,y,w,h,fontSize:row.shape==='diamond'?16:19,fill:'#ffffff',color:'#20262b',strokeWidth:1.6
- });
+ const node=(row,x,y,w,minimum,prefix)=>{
+  const type=Object.hasOwn(flowShapes,row.shape)?row.shape:'rect';
+  const o={id:id(),type,text:prefix+row.name,processId:row.processId,prefix,x,y,w,flowFit:true,
+   fontSize:type==='diamond'?16:19,fill:'#ffffff',color:'#20262b',strokeWidth:1.6};
+  const lines=wrapText(o.text,flowTextWidth(o),o.fontSize).length;
+  const fraction={diamond:.40,ellipse:.62,triangle:.32}[type]||1;
+  o.h=Math.max(minimum,Math.ceil((lines*o.fontSize*1.25+14)/fraction));
+  return o;
+ };
  const edge=(from,to,route,label='')=>({id:id(),from:from.id,to:to?.id,route,label,color:'#20262b',strokeWidth:1.8});
- const rail=(row,x,y)=>node(row,x-140,y,119,54,row.star?'★ ':'');
  let previous;
  let sequence=0;
  for(const [col,group] of groups.entries()){
@@ -336,32 +344,37 @@ function generateFlow(rows,columns){
   for(const [rowIndex,row] of group.entries()){
    const inputs=branches.filter(branch=>branch.target===row.key);
    const sameColumn=rowIndex>0;
-   if(sameColumn)y+=Math.max(40,inputs.length*64+12);
-   else if(!previous&&inputs.length)y+=inputs.length*64;
+   const sides=inputs.map(branch=>node(branch,x-140,0,119,54,branch.star?'★ ':''));
+   const railHeight=sides.reduce((total,side)=>total+side.h+10,0);
+   if(sameColumn)y+=Math.max(40,railHeight+12);
+   else if(!previous)y+=railHeight;
    const box=node(row,x,y,220,58,(row.star?'★ ':'')+(++sequence)+'. ');
    m.objects.push(box);
    const incoming=previous&&edge(previous,box,sameColumn?'down':'across',row.label);
    if(incoming&&!sameColumn&&hasRail)incoming.bend=x-170-(previous.x+previous.w+x)/2;
    if(incoming)m.edges.push(incoming);
    const route=incoming&&flowRoute(m,incoming);
-   for(const [i,branch] of inputs.entries()){
-    const branchY=sameColumn?previous.y+previous.h+6+i*64:incoming?box.y+box.h+10+i*64:22+i*64;
-    const side=rail(branch,x,branchY);
+   let branchY=sameColumn?previous.y+previous.h+6:incoming?box.y+box.h+10:22;
+   for(const [i,side] of sides.entries()){
+    const branch=inputs[i];
+    side.y=branchY;
+    branchY+=side.h+10;
     m.objects.push(side);
     const connection=edge(side,box,'across',branch.label);
     if(incoming){
      delete connection.to;
      connection.join=incoming.id;
-     connection.ratio=projectOnRoute(route,{x:sameColumn?x+110:route[1].x,y:branchY+27});
+     connection.ratio=projectOnRoute(route,{x:sameColumn?x+110:route[1].x,y:side.y+side.h/2});
     }
     m.edges.push(connection);
     m.height=Math.max(m.height,side.y+side.h+22);
    }
-   y+=box.h+(!sameColumn&&incoming?inputs.length*64:0);
+   y+=box.h+(!sameColumn&&incoming?railHeight:0);
    m.height=Math.max(m.height,y+22);
    previous=box;
   }
  }
+ if(m.height>4000)throw Error('流程图内容过长。请增加列数或拆分流程。');
  m.height=Math.max(260,m.height);
  return normalize(m);
 }
@@ -402,7 +415,7 @@ function svg(model,selection='',editing=false,{viewHeight,picked=[]}={}){const m
   if(o.type==='photo')out+=`<image href="${esc(o.data)}" width="${o.w}" height="${o.h}" preserveAspectRatio="xMidYMid meet"/>`;
   else if(['arrow','line'].includes(o.type))out+=`<line x1="${o.flipX?o.w:0}" y1="${o.flipY?o.h:0}" x2="${o.flipX?0:o.w}" y2="${o.flipY?0:o.h}" stroke="${o.color}" stroke-width="${o.strokeWidth}" ${o.type==='arrow'?`marker-end="url(#${objectMarker})"`:''}/>`;
   else {if(o.type==='ellipse')out+=`<ellipse cx="${o.w/2}" cy="${o.h/2}" rx="${o.w/2}" ry="${o.h/2}" ${style}/>`;else if(o.type==='triangle')out+=`<polygon points="${o.w/2},0 ${o.w},${o.h} 0,${o.h}" ${style}/>`;else if(o.type==='diamond')out+=`<polygon points="${o.w/2},0 ${o.w},${o.h/2} ${o.w/2},${o.h} 0,${o.h/2}" ${style}/>`;else out+=`<rect width="${o.w}" height="${o.h}" ${o.type==='text'?`fill="${o.fill}" stroke="none"`:style}/>`;
-   const lines=wrapText(o.text,o.w,o.fontSize),fs=o.fontSize;out+=`<text text-anchor="${o.type==='text'?'start':'middle'}" x="${o.type==='text'?4:o.w/2}" y="${o.h/2-(lines.length-1)*fs*.6}" dominant-baseline="middle" font-size="${fs}" font-family="Microsoft YaHei, sans-serif" fill="${o.color}">${lines.map((s,i)=>`<tspan x="${o.type==='text'?4:o.w/2}" dy="${i?fs*1.2:0}">${esc(s)}</tspan>`).join('')}</text>`;}
+   const lines=wrapText(o.text,flowTextWidth(o),o.fontSize),fs=o.fontSize;out+=`<text text-anchor="${o.type==='text'?'start':'middle'}" x="${o.type==='text'?4:o.w/2}" y="${o.h*(o.type==='triangle'?.72:.5)-(lines.length-1)*fs*.6}" dominant-baseline="middle" font-size="${fs}" font-family="Microsoft YaHei, sans-serif" fill="${o.color}">${lines.map((s,i)=>`<tspan x="${o.type==='text'?4:o.w/2}" dy="${i?fs*1.2:0}">${esc(s)}</tspan>`).join('')}</text>`;}
   if(editing){if(['arrow','line'].includes(o.type))out+=`<line x1="${o.flipX?o.w:0}" y1="${o.flipY?o.h:0}" x2="${o.flipX?0:o.w}" y2="${o.flipY?0:o.h}" stroke="transparent" stroke-width="${Math.max(8,o.strokeWidth)}" pointer-events="stroke"/>`;out+=`<rect width="${o.w}" height="${o.h}" fill="transparent" stroke="${o.id===selection||picked.includes(o.id)?'#0d9692':'transparent'}" stroke-dasharray="5 3" ${['arrow','line'].includes(o.type)?'pointer-events="none"':''}/>`;}
   if(editing&&o.id===selection&&['arrow','line'].includes(o.type)){const p=lineEndpoints(o);out+=`<circle data-endpoint="start" cx="${p.x1-o.x}" cy="${p.y1-o.y}" r="4" fill="white" stroke="#0d9692" stroke-width="1.5"/><circle data-endpoint="end" cx="${p.x2-o.x}" cy="${p.y2-o.y}" r="4" fill="#0d9692" stroke="white" stroke-width="1.2"/>`;}else if(editing&&o.id===selection)for(const [corner,x,y]of [["nw",0,0],["ne",o.w,0],["sw",0,o.h],["se",o.w,o.h]])out+=`<rect data-resize="${corner}" x="${x-3.5}" y="${y-3.5}" width="7" height="7" fill="#0d9692" stroke="white" stroke-width="1.2"/>`;out+='</g>';
  }return out+edgeLabels.join('')+edgeHandles.join('')+'</svg>';
@@ -547,5 +560,5 @@ function open(input,{title='图文画布',flow=false,photos=[],availableHeight,p
  }
  if(ev.key==='Escape'&&(tool||creating)){ev.preventDefault();if(creating){m=history.pop();creating=null;selected='';}tool='';snap=null;draw();message('已取消绘制');return;}if(/INPUT|TEXTAREA|SELECT/.test(ev.target.tagName))return;if(ev.key==='F2'){ev.preventDefault();beginInline();return;}if(ev.key==='Delete'){ev.preventDefault();action('delete');}if((ev.ctrlKey||ev.metaKey)&&ev.key.toLowerCase()==='z'){ev.preventDefault();action('undo');}if((ev.ctrlKey||ev.metaKey)&&ev.key.toLowerCase()==='d'){ev.preventDefault();action('copy');}};d.oncancel=()=>d.remove();draw();if(drawingHeight)message(contentHeight(m)>drawingHeight?'白色区域为文字之外的可用画布；灰色区域有超出元素，请手动移回或缩小。':'白色区域为文字之外的可用画布；文字和图片不自动缩放。');d.showModal();
 }
-const api={contentHeight,attachEndpoint,syncConnections,anchorPoints,nearestAnchor,resizeCorner,lineEndpoints,setLineEndpoints,lineAngle,setLineAngle,wrapText,normalize,edgePoints,flowRoute,flowLabel,flowShapes,generateFlow,resolvedFlow,remove,duplicate,fromPhotos,fromProcesses,svg,open};if(typeof module!=='undefined')module.exports=api;root.SOP_OBJECTS=api;
+const api={contentHeight,attachEndpoint,syncConnections,anchorPoints,nearestAnchor,resizeCorner,lineEndpoints,setLineEndpoints,lineAngle,setLineAngle,wrapText,flowTextWidth,normalize,edgePoints,flowRoute,flowLabel,flowShapes,generateFlow,resolvedFlow,remove,duplicate,fromPhotos,fromProcesses,svg,open};if(typeof module!=='undefined')module.exports=api;root.SOP_OBJECTS=api;
 })(typeof window==='undefined'?globalThis:window);

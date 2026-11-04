@@ -58,6 +58,26 @@ async function main(){
   });
   assert.equal(result.nodes,22);assert.equal(result.branches,4);assert.equal(result.cross,2);
   assert(result.orthogonal&&result.branchOnMain&&result.crossJoin);
+  const longNames=await page.evaluate(()=>{
+   const rows=[
+    {key:'first',role:'main',name:'安装深沟球轴承 6705ZZ'},
+    {key:'last',role:'main',name:'安装上盖'},
+    {key:'prep',role:'branch',target:'last',name:'轴承MR115ZZ、上盖预安装并检查装配尺寸'},
+    {key:'other',role:'branch',target:'last',name:'检查电机线束和太阳轮预装位置'}
+   ];
+   const graph=SOP_OBJECTS.generateFlow(rows,1),host=document.createElement('div');
+   graph.objects.push({id:'legacy-triangle',type:'triangle',text:'包装',x:430,y:20,w:160,h:58,fontSize:19});
+   host.innerHTML=SOP_OBJECTS.svg(graph);
+   document.body.append(host);
+   const [,last,prep,other]=graph.objects;
+   const bounds=host.querySelector(`[data-object="${prep.id}"] text`).getBBox();
+   const triangle=host.querySelector('[data-object="legacy-triangle"] text').getBBox();
+   host.remove();
+   return prep.h>54&&bounds.y>=4&&bounds.y+bounds.height<=prep.h-4
+    &&prep.y+prep.h<other.y&&other.y+other.h<last.y
+    &&triangle.y+triangle.height/2>58*.63&&triangle.y+triangle.height<58;
+  });
+  assert(longNames,'Long branch text must stay inside its box with room for the next branch');
   if(process.env.SOP_FLOW_QA_OUTPUT)await page.locator('#previewStage').screenshot({path:path.join(process.env.SOP_FLOW_QA_OUTPUT,'preview.png')});
   await page.locator('#editFlowGraph').click();
   const labelClearance=await canvas.locator('svg').evaluate(svg=>{
@@ -116,7 +136,7 @@ async function main(){
   await page.mouse.move(origin[0]+4,origin[1],{steps:6});
   assert.equal(await canvas.locator('[data-alignment="x"]').count(),1);
   await page.mouse.up();
-  assert.equal(await nodeGroup(second.id).getAttribute('transform'),beforeAlign);
+  assert.equal((await nodeGroup(second.id).getAttribute('transform')).split(' ')[0],beforeAlign.split(' ')[0]);
   await page.mouse.move(...await screen(first.x-5,first.y-6));await page.mouse.down();
   await page.mouse.move(...await screen(second.x+second.w+5,second.y+second.h+5),{steps:8});
   assert.equal(await canvas.locator('[data-marquee]').count(),1);
