@@ -94,6 +94,12 @@ async function exportDocx(project,layout,front){
 }
   if(wide)for(const row of children(t,'tr').slice(2))for(const c of cells(row).slice(1))centerExisting(c);
   // A fixed template row may clip overflowing content, but must never expand or split onto another page.
+  if(wide)for(const row of children(t,'tr').slice(4,12))for(const c of cells(row).slice(1)){
+   const pr=first(first(c,'p'),'pPr'),spacing=first(pr,'spacing');
+   pr.insertBefore(el(d,'wordWrap',{val:0}),first(pr,'snapToGrid')||spacing);
+   spacing.setAttributeNS(W,'w:line','230');
+   spacing.setAttributeNS(W,'w:lineRule','exact');
+  }
   for(const row of children(t,'tr')){let pr=first(row,'trPr');if(!pr){pr=el(d,'trPr');row.prepend(pr);}if(!first(pr,'cantSplit'))pr.append(el(d,'cantSplit'));const height=first(pr,'trHeight');if(height)height.setAttributeNS(W,'w:hRule','exact');}
   for(const pp of desc(t,'pPr'))for(const tag of ['keepNext','keepLines','pageBreakBefore'])for(const n of children(pp,tag))n.remove();
   body.append(t,separator(i<layout.length-1));groups.push({key:'body:'+p.sourceId+':'+p.fragment,nodes:[...body.childNodes].slice(begin),number:p.pageNo});
