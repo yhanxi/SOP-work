@@ -4,7 +4,7 @@
   "private": true,
   "description": "离线 SOP 编写、预览与可编辑 Word 导出工具",
   "author": "SOP 工作台",
-  "license": "UNLICENSED",
+  "license": "MIT",
   "main": "main.cjs",
   "scripts": {
     "prepare:renderer": "node prepare.cjs",
