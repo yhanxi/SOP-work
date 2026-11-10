@@ -21,7 +21,7 @@ ipcMain.handle('sop:project-reveal',async(event,token)=>{
  const current=await projectFiles.info();
  if(!current||current.token!==token)throw Error('请先保存或打开当前项目文件。');
  const file=await fs.stat(current.path).catch(()=>null);
- if(!file?.isFile())throw Error('找不到当前项目文件。文件可能已移动或删除。');
+ if(!file?.isFile())throw Error('找不到当前项目文件。若目录已移动或重命名，请用「保存」选择新位置。');
  shell.showItemInFolder(current.path);
 });
 ipcMain.handle('sop:export-pdf',async(event,name)=>{

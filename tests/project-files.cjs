@@ -5,8 +5,8 @@ module.exports=(async()=>{
  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'sop-save-test-'));
  const a=path.join(dir,'first.sop.json'),b=path.join(dir,'second.sop.json'),word=path.join(dir,'source.docx');
  const text=value=>JSON.stringify({schema:'sop-studio/v1',meta:{value},settings:{},pages:[]});
- let savePath=a,openPath=a,response=0,pause=0;
- const dialog={showSaveDialog:async()=>savePath?{filePath:savePath}:{canceled:true},showOpenDialog:async()=>({filePaths:[openPath]}),showMessageBox:async()=>({response})};
+ let savePath=a,openPath=a,response=0,pause=0,saveOptions;
+ const dialog={showSaveDialog:async(_window,options)=>{saveOptions=options;return savePath?{filePath:savePath}:{canceled:true};},showOpenDialog:async()=>({filePaths:[openPath]}),showMessageBox:async()=>({response})};
  const options={dialog,getWindow:()=>null,sessionFile:path.join(dir,'session.json'),pause:()=>pause++,resume:()=>pause--};
  try{
   const service=createProjectFileService(options);
@@ -33,6 +33,28 @@ module.exports=(async()=>{
   const unchanged=await fs.readFile(a,'utf8');await assert.rejects(()=>atomicWrite(a,text(100),'wrong-hash'));assert.equal(await fs.readFile(a,'utf8'),unchanged,'Failed atomic write must keep original');
   assert(!(await fs.readdir(dir)).some(name=>name.endsWith('.tmp')),'Temp file must be cleaned');
   await fs.writeFile(word,'word original');openPath=word;const imported=await restored.open();assert.equal(imported.kind,'docx');await restored.commit(imported.ticket);assert.equal(await restored.info(),null);assert.equal(await fs.readFile(word,'utf8'),'word original');
+  const oldFolder=path.join(dir,'旧项目目录'),newFolder=path.join(dir,'重命名后的目录');
+  await fs.mkdir(oldFolder);
+  savePath=path.join(oldFolder,'测试.sop.json');
+  const beforeMove=(await restored.save({text:text('before'),name:'测试.sop.json'})).binding;
+  await fs.rename(oldFolder,newFolder);
+  savePath=null;
+  assert((await restored.save({text:text('edited'),token:beforeMove.token})).canceled);
+  assert.equal(saveOptions.defaultPath,'测试.sop.json');
+  assert.deepEqual(await restored.info(),beforeMove);
+  savePath=path.join(newFolder,'测试.sop.json');
+  response=1;
+  assert((await restored.save({text:text('edited'),token:beforeMove.token})).canceled);
+  assert.equal(await fs.readFile(savePath,'utf8'),text('before'));
+  response=0;
+  const afterMove=(await restored.save({text:text('edited'),token:beforeMove.token})).binding;
+  assert.equal(afterMove.path,savePath);
+  assert.notEqual(afterMove.token,beforeMove.token);
+  assert.equal(await fs.readFile(savePath,'utf8'),text('edited'));
+  assert.deepEqual(await createProjectFileService(options).info(),afterMove);
+  savePath=null;
+  await restored.save({text:text('next edit'),token:afterMove.token});
+  assert.equal(await fs.readFile(afterMove.path,'utf8'),text('next edit'));
   assert.equal(pause,0,'Native dialogs must balance close timer suspension');
   console.log('PASS: save/overwrite/save-as/cancel, conflict protection, validation, association recovery, Word isolation and atomic failure preservation');
  }finally{await fs.rm(dir,{recursive:true,force:true});}
