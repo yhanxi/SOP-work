@@ -1,6 +1,6 @@
 {
   "name": "sop-studio-desktop",
-  "version": "0.4.21",
+  "version": "0.4.22",
   "private": true,
   "description": "离线 SOP 编写、预览与可编辑 Word 导出工具",
   "author": "SOP 工作台",

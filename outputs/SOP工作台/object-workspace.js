@@ -426,7 +426,7 @@ function open(input,{title='图文画布',flow=false,photos=[],availableHeight,p
  const d=document.createElement('dialog');d.className='object-dialog';let m=normalize(input),selected='',history=[],drag=null,snap=null,linkFrom='',inlineEdit=null,lastTap=null,tool='',creating=null;
  let picked=[],marquee=null,boxMode=false,guides=null;
  const drawingHeight=Number.isFinite(availableHeight)?Math.max(1,availableHeight):null;if(drawingHeight)m.height=Math.max(m.height,drawingHeight);const bounds=()=>({width:m.width,height:drawingHeight??m.height});
- d.innerHTML=`<div class="dialog-head"><div><h2>${esc(title)}</h2><small>选择形状后在画布按下并拖动绘制，松开完成，Esc 取消。拖动对象移动，四角均可缩放；箭头端点吸附后跟随目标移动、缩放；拖离可解除连接。双击形状可直接编辑文字。${flow?' 拖空白处框选。靠近对齐位置会吸附，按 Alt 自由移动。':''}</small></div><button data-action="close">取消</button></div><div class="object-tools"><button data-add="rect">＋ 矩形</button><button data-add="ellipse">＋ 椭圆</button><button data-add="diamond">＋ 菱形</button><button data-add="arrow">＋ 箭头</button>${flow?'<button data-add="triangle">＋ 三角形</button><button data-action="box" aria-pressed="false">框选</button><button data-action="connect">连接节点 / 汇入主线</button>':'<button data-action="upload">＋ 照片</button><input type="file" accept="image/png,image/jpeg,image/webp" hidden id="objectPhoto">'}<button data-action="editText">编辑文字</button><button data-action="copy">复制对象</button><button data-action="delete">删除对象</button><button data-action="undo">撤销</button><span class="object-message"></span></div><div class="object-layout"><div class="object-stage"></div><aside class="object-properties"></aside></div><div class="dialog-foot"><span>保存后写入项目；取消放弃本次画布修改。</span><button data-action="save" class="primary">${preview?'应用流程图':'保存画布'}</button></div>`;document.body.append(d);
+ d.innerHTML=`<div class="dialog-head"><div><h2>${esc(title)}</h2><small>选择形状后在画布按下并拖动绘制，松开完成，Esc 取消。拖动对象移动，四角均可缩放；箭头端点吸附后跟随目标移动、缩放；拖离可解除连接。双击形状可直接编辑文字。${flow?' 拖空白处框选。靠近对齐位置会吸附，按 Alt 自由移动。':' 复制图片后，可按 Ctrl+V 粘贴到画布。'}</small></div><button data-action="close">取消</button></div><div class="object-tools"><button data-add="rect">＋ 矩形</button><button data-add="ellipse">＋ 椭圆</button><button data-add="diamond">＋ 菱形</button><button data-add="arrow">＋ 箭头</button>${flow?'<button data-add="triangle">＋ 三角形</button><button data-action="box" aria-pressed="false">框选</button><button data-action="connect">连接节点 / 汇入主线</button>':'<button data-action="upload">＋ 照片</button><input type="file" accept="image/png,image/jpeg,image/webp" hidden id="objectPhoto">'}<button data-action="editText">编辑文字</button><button data-action="copy">复制对象</button><button data-action="delete">删除对象</button><button data-action="undo">撤销</button><span class="object-message"></span></div><div class="object-layout"><div class="object-stage"></div><aside class="object-properties"></aside></div><div class="dialog-foot"><span>保存后写入项目；取消放弃本次画布修改。</span><button data-action="save" class="primary">${preview?'应用流程图':'保存画布'}</button></div>`;document.body.append(d);
  const q=s=>d.querySelector(s),push=()=>{history.push(clone(m));if(history.length>60)history.shift();},message=t=>q('.object-message').textContent=t;
  function drawStage(){syncConnections(m);q('.object-stage').style.cursor=tool||boxMode?'crosshair':'';q('[data-action=box]')?.setAttribute('aria-pressed',String(boxMode));d.querySelectorAll('[data-add]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.add===tool)));q('.object-stage').innerHTML=svg(m,selected,true,{picked});
   if(marquee||guides){
@@ -555,12 +555,54 @@ function open(input,{title='图文画布',flow=false,photos=[],availableHeight,p
    else message('请先选择起点节点');
   }else if(name==='upload')q('#objectPhoto').click();
  }
- d.querySelectorAll('[data-action]').forEach(b=>b.onclick=()=>action(b.dataset.action));if(q('#objectPhoto'))q('#objectPhoto').onchange=async ev=>{const f=ev.target.files[0];if(!f)return;if(f.size>15*1024*1024){message('照片请小于 15MB');return;}const data=await new Promise((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(r.result);r.onerror=reject;r.readAsDataURL(f);});const im=await new Promise((resolve,reject)=>{const image=new Image();image.onload=()=>resolve(image);image.onerror=reject;image.src=data;});const ratio=im.naturalWidth/im.naturalHeight;push();const o={id:id(),type:'photo',data,x:80,y:80,w:Math.min(360,240*ratio),h:Math.min(240,360/ratio)};m.objects.push(o);m=normalize(m);selected=o.id;draw();};
+ d.querySelectorAll('[data-action]').forEach(b=>b.onclick=()=>action(b.dataset.action));
+ if(!flow){
+  const input=q('#objectPhoto');
+  let addingPhoto=false;
+  async function addPhoto(file,{pasted=false}={}){
+   if(!file||addingPhoto)return;
+   if(!/^image\/(png|jpeg|webp)$/i.test(file.type)){message('请选择 PNG、JPEG 或 WebP 图片。');return;}
+   if(file.size>15*1024*1024){message('单张图片请控制在 15MB 以内。');return;}
+   if(m.objects.length>=300){message('画布对象已满，请先删除不需要的对象。');return;}
+   addingPhoto=true;
+   try{
+    const data=await new Promise((resolve,reject)=>{
+     const reader=new FileReader();
+     reader.onload=()=>resolve(reader.result);
+     reader.onerror=()=>reject(Error('无法读取图片。'));
+     reader.readAsDataURL(file);
+    });
+    const image=new Image();image.src=data;await image.decode();
+    if(!d.open||!d.isConnected)return;
+    if(creating||drag||inlineEdit){message('请先完成当前编辑，再添加图片。');return;}
+    const area=bounds();
+    if(area.height<10){message('图文区剩余空间不足，请先调整正文。');return;}
+    const scale=Math.min(360/image.naturalWidth,240/image.naturalHeight,area.width/image.naturalWidth,area.height/image.naturalHeight);
+    const w=image.naturalWidth*scale,h=image.naturalHeight*scale;
+    const x=pasted?(area.width-w)/2:Math.min(80,area.width-w);
+    const y=pasted?(area.height-h)/2:Math.min(80,area.height-h);
+    const photo={id:id(),type:'photo',data,x,y,w,h,aspectRatio:w/h};
+    push();m=normalize({...m,objects:[...m.objects,photo]});
+    selected=photo.id;picked=[];tool='';snap=null;boxMode=false;
+    draw();message(pasted?'已粘贴图片，可拖动或缩放。':'已添加图片，可拖动或缩放。');
+   }catch{if(d.open)message('无法读取这张图片，请重新复制或从文件添加。');}
+   finally{addingPhoto=false;}
+  }
+  input.onchange=()=>{const file=input.files[0];input.value='';void addPhoto(file);};
+  d.onpaste=event=>{
+   if(event.target.closest('input,textarea,select,[contenteditable]'))return;
+   const file=[...(event.clipboardData?.files||[])].find(item=>item.type.startsWith('image/'));
+   if(!file)return;
+   event.preventDefault();event.stopPropagation();
+   void addPhoto(file,{pasted:true});
+  };
+ }
+
  d.onkeydown=ev=>{
  if(ev.key==='Escape'&&(marquee||boxMode||picked.length)){
   ev.preventDefault();if(drag?.group){m=history.pop()||m;drag=null;guides=null;}marquee=null;boxMode=false;picked=[];draw();return;
  }
- if(ev.key==='Escape'&&(tool||creating)){ev.preventDefault();if(creating){m=history.pop();creating=null;selected='';}tool='';snap=null;draw();message('已取消绘制');return;}if(/INPUT|TEXTAREA|SELECT/.test(ev.target.tagName))return;if(ev.key==='F2'){ev.preventDefault();beginInline();return;}if(ev.key==='Delete'){ev.preventDefault();action('delete');}if((ev.ctrlKey||ev.metaKey)&&ev.key.toLowerCase()==='z'){ev.preventDefault();action('undo');}if((ev.ctrlKey||ev.metaKey)&&ev.key.toLowerCase()==='d'){ev.preventDefault();action('copy');}};d.oncancel=()=>d.remove();draw();if(drawingHeight)message(contentHeight(m)>drawingHeight?'白色区域为文字之外的可用画布；灰色区域有超出元素，请手动移回或缩小。':'白色区域为文字之外的可用画布；文字和图片不自动缩放。');d.showModal();
+ if(ev.key==='Escape'&&(tool||creating)){ev.preventDefault();if(creating){m=history.pop();creating=null;selected='';}tool='';snap=null;draw();message('已取消绘制');return;}if(/INPUT|TEXTAREA|SELECT/.test(ev.target.tagName))return;if(ev.key==='F2'){ev.preventDefault();beginInline();return;}if(ev.key==='Delete'){ev.preventDefault();action('delete');}if((ev.ctrlKey||ev.metaKey)&&ev.key.toLowerCase()==='z'){ev.preventDefault();action('undo');}if((ev.ctrlKey||ev.metaKey)&&ev.key.toLowerCase()==='d'){ev.preventDefault();action('copy');}};d.oncancel=()=>d.remove();draw();if(drawingHeight)message(contentHeight(m)>drawingHeight?'白色区域为文字之外的可用画布；灰色区域有超出元素，请手动移回或缩小。':'白色区域为文字之外的可用画布；文字和图片不自动缩放。');d.showModal();if(!flow)q('.object-stage').focus({preventScroll:true});
 }
 const api={contentHeight,attachEndpoint,syncConnections,anchorPoints,nearestAnchor,resizeCorner,lineEndpoints,setLineEndpoints,lineAngle,setLineAngle,wrapText,flowTextWidth,normalize,edgePoints,flowRoute,flowLabel,flowShapes,generateFlow,resolvedFlow,remove,duplicate,fromPhotos,fromProcesses,svg,open};if(typeof module!=='undefined')module.exports=api;root.SOP_OBJECTS=api;
 })(typeof window==='undefined'?globalThis:window);
