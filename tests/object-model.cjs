@@ -3,6 +3,16 @@ const assert=require('node:assert/strict'),O=require('../outputs/SOP工作台/ob
 const vertical=O.normalize({objects:[{id:'vertical',type:'arrow',x:100,y:100,w:0,h:180,flipY:true,color:'#d62b32'}]}).objects[0];assert.equal(vertical.w,0);assert.equal(vertical.h,180);assert(vertical.flipY);
 const svg=O.svg({objects:[vertical]});assert(svg.includes('fill="#d62b32"'));assert(svg.includes('y1="180"'));assert(svg.includes('y2="0"'));
 const png='data:image/png;base64,aGVsbG8=';const photo=O.fromPhotos([{data:png,width:900,height:450,marks:[]}]).objects[0];assert.equal(photo.w/photo.h,2);photo.w=600;assert.equal(O.normalize({objects:[photo]}).objects[0].w/O.normalize({objects:[photo]}).objects[0].h,2);
+const source=[{data:png,width:900,height:450,caption:'工位实拍'}];
+const withCaption=O.fromPhotos(source);
+assert.equal(withCaption.objects.length,1);
+assert.equal(withCaption.objects[0].caption,source[0].caption);
+const oldPhoto={...photo,caption:undefined,w:180,h:90};
+const oldLabel={id:'old-label',type:'text',text:source[0].caption,x:40,y:248,w:370,h:34,fontSize:16,color:'#243e46',fill:'transparent'};
+const migrated=O.restorePhotoCaptions({objects:[oldPhoto,oldLabel]},source);
+assert.equal(migrated.objects.length,1);
+assert.equal(migrated.objects[0].caption,source[0].caption);
+assert.equal(O.restorePhotoCaptions({objects:[oldPhoto,oldLabel,{...oldLabel,id:'other'}]},source).objects.length,3);
 const graph=O.normalize({width:1000,height:650,objects:[{id:'a',type:'diamond',x:100,y:50,w:140,h:80,text:'检验合格？'},{id:'b',type:'rect',x:500,y:300,w:200,h:70}],edges:[{id:'edge',from:'a',to:'b',label:'否'}]});const before=O.edgePoints(graph,graph.edges[0]);graph.objects[0].x+=80;const after=O.edgePoints(graph,graph.edges[0]);assert.notDeepEqual(after,before);assert.equal(graph.edges[0].label,'否');
 const saved=JSON.parse(JSON.stringify(graph));assert.deepEqual(O.normalize(saved),graph);const duplicate=O.duplicate(saved,'a');assert(duplicate!=='a');assert.equal(saved.objects.length,3);O.remove(saved,'a');assert.equal(saved.edges.length,0);assert(saved.objects.some(o=>o.id===duplicate));
 const processes=Array.from({length:25},(_,i)=>({name:'工序'+i,processId:'p'+i}));assert.throws(()=>O.fromProcesses(processes),/最多支持24/);assert.equal(new Set(O.fromProcesses(processes.slice(0,24)).objects.map(o=>o.x+','+o.y)).size,24);

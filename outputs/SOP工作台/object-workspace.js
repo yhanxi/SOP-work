@@ -385,14 +385,30 @@ function remove(m,key){syncConnections(m);m.objects=m.objects.filter(o=>o.id!==k
 function duplicate(m,key){const o=m.objects.find(x=>x.id===key);if(!o)return null;const n={...clone(o),id:id(),x:Math.min(m.width-o.w,o.x+20),y:Math.min(m.height-o.h,o.y+20)};delete n.attachments;delete n.processId;delete n.prefix;m.objects.push(n);return n.id;}
 function fromPhotos(photos){
  const m={width:900,height:520,objects:[],edges:[]};
- (photos||[]).forEach((ph,i)=>{const x=40+(i%2)*440,y=40+Math.floor(i/2)*270,ratio=(ph.width&&ph.height)?ph.width/ph.height:1,w=Math.min(370,200*ratio),h=w/ratio;m.height=Math.max(m.height,y+h+70);m.objects.push({id:id(),type:'photo',data:ph.data,x,y,w,h});
+ (photos||[]).forEach((ph,i)=>{const x=40+(i%2)*440,y=40+Math.floor(i/2)*270,ratio=(ph.width&&ph.height)?ph.width/ph.height:1,w=Math.min(370,200*ratio),h=w/ratio;m.height=Math.max(m.height,y+h+70);m.objects.push({id:id(),type:'photo',data:ph.data,caption:ph.caption||'',x,y,w,h});
   for(const mark of ph.marks||[]){const fs=(mark.fontSize||.036)*w,isText=mark.type==='text',x2=mark.x2??mark.x,y2=mark.y2??mark.y;m.objects.push({id:id(),type:mark.type==='circle'?'ellipse':mark.type,x:x+(isText?mark.x:Math.min(mark.x,x2))*w,y:y+(isText?mark.y*h-fs:Math.min(mark.y,y2)*h),w:isText?Math.max(40,Array.from(mark.text||'').reduce((n,c)=>n+(c.charCodeAt(0)>255?1:.58),0)*fs+8):Math.abs(x2-mark.x)*w,h:isText?fs*1.4:Math.abs(y2-mark.y)*h,text:mark.text,fontSize:fs,color:mark.color,fill:isText?(mark.background||'#fff7b7'):'transparent',flipX:x2<mark.x,flipY:y2<mark.y});}
-  if(ph.caption)m.objects.push({id:id(),type:'text',x,y:y+h+8,w:370,h:34,text:ph.caption,fontSize:16,color:'#243e46',fill:'transparent'});
  });return normalize(m);
+}
+function restorePhotoCaptions(input,photos){
+ const model=normalize(input);
+ for(const source of photos){
+  if(!source.caption||photos.filter(photo=>photo.caption===source.caption).length!==1)continue;
+  const pictures=model.objects.filter(o=>o.type==='photo'&&o.data===source.data);
+  if(pictures.length!==1||pictures[0].caption!==undefined)continue;
+  // Match only a unique label with the old generated caption style.
+  const labels=model.objects.filter(o=>o.type==='text'&&o.text===source.caption&&o.w===370&&o.h===34&&o.fontSize===16&&o.color==='#243e46'&&o.fill==='transparent');
+  if(labels.length!==1)continue;
+  const label=labels[0];
+  const attached=model.objects.some(o=>Object.values(o.attachments||{}).some(link=>link.targetId===label.id));
+  if(attached||model.edges.some(e=>e.from===label.id||e.to===label.id))continue;
+  pictures[0].caption=label.text;
+  model.objects=model.objects.filter(o=>o!==label);
+ }
+ return model;
 }
 function fromProcesses(pages){const m={width:1000,height:650,objects:[],edges:[]},seen=new Set();pages.filter(p=>{if(seen.has(p.processId))return false;seen.add(p.processId);return true;}).forEach((p,i)=>{m.objects.push({id:id(),type:'rect',text:p.name,x:60+Math.floor(i/6)*240,y:30+(i%6)*95,w:200,h:60,fill:'#ffffff'});if(i)m.edges.push({id:id(),from:m.objects[i-1].id,to:m.objects[i].id,label:''});});if(m.objects.length>24)throw Error('从工序生成最多支持24个节点；请拆分为多个流程或在画布手动添加。');return normalize(m);}
 // Occupied bounds detect elements outside the remaining page area without resizing them.
-function contentHeight(model){const m=normalize(model);return m.objects.reduce((bottom,o)=>{let edge=o.y+o.h;if(!['photo','arrow','line'].includes(o.type)&&o.text){const lines=wrapText(o.text,o.w,o.fontSize);edge=Math.max(edge,o.y+o.h/2+(lines.length-1)*o.fontSize*.6+o.fontSize*.7);}return Math.max(bottom,edge+(['arrow','line'].includes(o.type)?Math.max(8,o.strokeWidth*3.5):8));},0);}
+function contentHeight(model){const m=normalize(model);return m.objects.reduce((bottom,o)=>{let edge=o.y+o.h;if(o.type==='photo'&&o.caption)edge+=4+17*wrapText(o.caption,o.w,14).length;if(!['photo','arrow','line'].includes(o.type)&&o.text){const lines=wrapText(o.text,o.w,o.fontSize);edge=Math.max(edge,o.y+o.h/2+(lines.length-1)*o.fontSize*.6+o.fontSize*.7);}return Math.max(bottom,edge+(['arrow','line'].includes(o.type)?Math.max(8,o.strokeWidth*3.5):8));},0);}
 function svg(model,selection='',editing=false,{viewHeight,picked=[]}={}){const m=normalize(model),height=Number.isFinite(viewHeight)?Math.max(1,viewHeight):m.height,marker='sop-object-arrow-'+(++renderId);let out=`<svg class="object-sheet" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${m.width} ${height}" role="img" aria-label="独立对象画布"><defs><marker id="${marker}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#243e46"/></marker></defs><rect width="${m.width}" height="${height}" fill="white"/>`;
  const edgeLabels=[],edgeHandles=[];
  for(const e of m.edges){
@@ -414,7 +430,10 @@ function svg(model,selection='',editing=false,{viewHeight,picked=[]}={}){const m
   }
  }
  for(const o of m.objects){const objectMarker=marker+'-'+String(o.id).replace(/[^a-z0-9]/gi,'');out+=`<defs><marker id="${objectMarker}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="${o.color}"/></marker></defs>`;out+=`<g data-object="${esc(o.id)}" transform="translate(${o.x} ${o.y})">`;const style=`fill="${o.fill}" stroke="${o.color}" stroke-width="${o.strokeWidth}"`;
-  if(o.type==='photo')out+=`<image href="${esc(o.data)}" width="${o.w}" height="${o.h}" preserveAspectRatio="xMidYMid meet"/>`;
+  if(o.type==='photo'){
+   out+=`<image href="${esc(o.rendered||o.data)}" width="${o.w}" height="${o.h}" preserveAspectRatio="xMidYMid meet"/>`;
+   if(o.caption)out+=`<text x="${o.w/2}" y="${o.h+4}" dominant-baseline="hanging" text-anchor="middle" font-size="14" fill="#111" pointer-events="${editing?'visiblePainted':'none'}">${wrapText(o.caption,o.w,14).map((text,i)=>`<tspan x="${o.w/2}" dy="${i?17:0}">${esc(text)}</tspan>`).join('')}</text>`;
+  }
   else if(['arrow','line'].includes(o.type))out+=`<line x1="${o.flipX?o.w:0}" y1="${o.flipY?o.h:0}" x2="${o.flipX?0:o.w}" y2="${o.flipY?0:o.h}" stroke="${o.color}" stroke-width="${o.strokeWidth}" ${o.type==='arrow'?`marker-end="url(#${objectMarker})"`:''}/>`;
   else {if(o.type==='ellipse')out+=`<ellipse cx="${o.w/2}" cy="${o.h/2}" rx="${o.w/2}" ry="${o.h/2}" ${style}/>`;else if(o.type==='triangle')out+=`<polygon points="${o.w/2},0 ${o.w},${o.h} 0,${o.h}" ${style}/>`;else if(o.type==='diamond')out+=`<polygon points="${o.w/2},0 ${o.w},${o.h/2} ${o.w/2},${o.h} 0,${o.h/2}" ${style}/>`;else out+=`<rect width="${o.w}" height="${o.h}" ${o.type==='text'?`fill="${o.fill}" stroke="none"`:style}/>`;
    const lines=wrapText(o.text,flowTextWidth(o),o.fontSize),fs=o.fontSize;out+=`<text text-anchor="${o.type==='text'?'start':'middle'}" x="${o.type==='text'?4:o.w/2}" y="${o.h*(o.type==='triangle'?.72:.5)-(lines.length-1)*fs*.6}" dominant-baseline="middle" font-size="${fs}" font-family="Microsoft YaHei, sans-serif" fill="${o.color}">${lines.map((s,i)=>`<tspan x="${o.type==='text'?4:o.w/2}" dy="${i?fs*1.2:0}">${esc(s)}</tspan>`).join('')}</text>`;}
@@ -604,5 +623,5 @@ function open(input,{title='图文画布',flow=false,photos=[],availableHeight,p
  }
  if(ev.key==='Escape'&&(tool||creating)){ev.preventDefault();if(creating){m=history.pop();creating=null;selected='';}tool='';snap=null;draw();message('已取消绘制');return;}if(/INPUT|TEXTAREA|SELECT/.test(ev.target.tagName))return;if(ev.key==='F2'){ev.preventDefault();beginInline();return;}if(ev.key==='Delete'){ev.preventDefault();action('delete');}if((ev.ctrlKey||ev.metaKey)&&ev.key.toLowerCase()==='z'){ev.preventDefault();action('undo');}if((ev.ctrlKey||ev.metaKey)&&ev.key.toLowerCase()==='d'){ev.preventDefault();action('copy');}};d.oncancel=()=>d.remove();draw();if(drawingHeight)message(contentHeight(m)>drawingHeight?'白色区域为文字之外的可用画布；灰色区域有超出元素，请手动移回或缩小。':'白色区域为文字之外的可用画布；文字和图片不自动缩放。');d.showModal();if(!flow)q('.object-stage').focus({preventScroll:true});
 }
-const api={contentHeight,attachEndpoint,syncConnections,anchorPoints,nearestAnchor,resizeCorner,lineEndpoints,setLineEndpoints,lineAngle,setLineAngle,wrapText,flowTextWidth,normalize,edgePoints,flowRoute,flowLabel,flowShapes,generateFlow,resolvedFlow,remove,duplicate,fromPhotos,fromProcesses,svg,open};if(typeof module!=='undefined')module.exports=api;root.SOP_OBJECTS=api;
+const api={contentHeight,attachEndpoint,syncConnections,anchorPoints,nearestAnchor,resizeCorner,lineEndpoints,setLineEndpoints,lineAngle,setLineAngle,wrapText,flowTextWidth,normalize,edgePoints,flowRoute,flowLabel,flowShapes,generateFlow,resolvedFlow,remove,duplicate,fromPhotos,restorePhotoCaptions,fromProcesses,svg,open};if(typeof module!=='undefined')module.exports=api;root.SOP_OBJECTS=api;
 })(typeof window==='undefined'?globalThis:window);
