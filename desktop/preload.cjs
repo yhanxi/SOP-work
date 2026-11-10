@@ -2,6 +2,7 @@
 const {contextBridge,ipcRenderer}=require('electron');
 contextBridge.exposeInMainWorld('sopDesktop',{
  getProjectFile:()=>ipcRenderer.invoke('sop:project-info'),
+ revealProjectFile:token=>ipcRenderer.invoke('sop:project-reveal',token),
  resetProjectFile:()=>ipcRenderer.invoke('sop:project-reset'),
  openProjectFile:()=>ipcRenderer.invoke('sop:project-open'),
  commitProjectOpen:ticket=>ipcRenderer.invoke('sop:project-commit-open',ticket),

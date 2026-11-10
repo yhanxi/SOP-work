@@ -4,11 +4,25 @@
 window.SOP_FILES={create({getProject,applyProject,recover,toast,download,filename,stateText}){
  const desktop=window.sopDesktop;
  let binding=null,handle=null,savedHash='',diskHash='',revision=0,savedRevision=0,initialDirty=false,busy=false,ready=false;
+ const folderButton=document.getElementById('projectFolderBtn');
+ if(folderButton&&desktop?.revealProjectFile){
+  folderButton.hidden=false;
+  folderButton.onclick=async()=>{
+   try{await desktop.revealProjectFile(binding?.token);}
+   catch(error){toast(String(error.message).replace(/^.*?Error:\s*/,''),true);}
+  };
+ }
+ function updateFolderButton(){
+  if(!folderButton)return;
+  folderButton.disabled=!ready||busy||!binding?.token;
+  folderButton.title=binding?.path||'请先保存或打开项目文件';
+ }
  const hash=async text=>Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(text))),b=>b.toString(16).padStart(2,'0')).join('');
  const contentHash=()=>hash(stateText(getProject()));
  const dirty=()=>initialDirty||revision!==savedRevision;
  const state=()=>({binding,handle,savedHash,diskHash,dirty:dirty()});
  function status(){
+  updateFolderButton();
   const el=document.querySelector('#saveState');if(!ready)return;
   const file=binding?.name||handle?.name;
   el.textContent=file?file+' · '+(dirty()?'未保存修改':'项目文件已保存'):(dirty()?'未保存为项目文件':'尚未选择项目文件');
@@ -16,7 +30,7 @@ window.SOP_FILES={create({getProject,applyProject,recover,toast,download,filenam
   el.title=(binding?.path||file||'首次保存请选择 .sop.json 文件')+'\n'+(document.body.dataset.recovery==='failed'?'本机恢复缓存不可用，请及时保存文件。':'编辑后自动保留本机恢复缓存；项目文件请点击“保存”。');
   document.title=(dirty()?'* ':'')+(getProject().meta.product||'SOP 工作台');
  }
- function setBusy(value){busy=value;for(const id of ['saveBtn','saveAsBtn','newBtn','importBtn'])document.getElementById(id).disabled=value||!ready;}
+ function setBusy(value){busy=value;for(const id of ['saveBtn','saveAsBtn','newBtn','importBtn'])document.getElementById(id).disabled=value||!ready;updateFolderButton();}
  function pendingDialog(){
   if(document.querySelector('.object-dialog[open]'))return '请先点击“保存画布”，或取消画布编辑，再保存项目或关闭软件。';
   if(document.querySelector('#photoDialog[open]'))return '请先保存图片标注，或关闭标注窗口，再保存项目或关闭软件。';

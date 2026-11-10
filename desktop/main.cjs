@@ -1,5 +1,5 @@
 'use strict';
-const {app,BrowserWindow,Menu,protocol,net,ipcMain,dialog}=require('electron');
+const {app,BrowserWindow,Menu,protocol,net,ipcMain,dialog,shell}=require('electron');
 const fs=require('node:fs/promises');
 const path=require('node:path');
 const {pathToFileURL}=require('node:url');
@@ -16,6 +16,14 @@ async function respondToClose(result){clearTimeout(closeTimer);closing=false;if(
 ipcMain.on('sop:close-ready',(event,result)=>{if(trusted(event)&&closing)respondToClose(result);});
 for(const [channel,method]of [['info','info'],['reset','reset'],['open','open'],['commit-open','commit'],['save','save'],['confirm','confirm']])ipcMain.handle('sop:project-'+channel,(event,arg)=>{if(!trusted(event))throw Error('请求来源不支持');return projectFiles[method](arg);});
 for(const [name,action]of [['info',()=>updater.info()],['check',()=>updater.check(true)],['download',()=>updater.download()],['cancel',()=>updater.cancel()],['settings',value=>updater.configure(value)],['install',async()=>{await updater.prepareInstall();restartRequested=true;win.close();}],['release',()=>require('electron').shell.openExternal(require('./update-core.cjs').releaseURL)]])ipcMain.handle('sop:update-'+name,(event,arg)=>{if(!trusted(event))throw Error('请求来源不支持');return action(arg);});
+ipcMain.handle('sop:project-reveal',async(event,token)=>{
+ if(!trusted(event))throw Error('请求来源不支持');
+ const current=await projectFiles.info();
+ if(!current||current.token!==token)throw Error('请先保存或打开当前项目文件。');
+ const file=await fs.stat(current.path).catch(()=>null);
+ if(!file?.isFile())throw Error('找不到当前项目文件。文件可能已移动或删除。');
+ shell.showItemInFolder(current.path);
+});
 ipcMain.handle('sop:export-pdf',async(event,name)=>{
  if(!trusted(event))throw Error('请求来源不支持');
  try{const safe=String(name||'SOP.pdf').replace(/[\\/:*?"<>|]/g,'_').slice(0,180);const result=await dialog.showSaveDialog(win,{title:'保存 SOP PDF',defaultPath:path.join(app.getPath('documents'),safe),filters:[{name:'PDF 文档',extensions:['pdf']} ]});if(result.canceled)return {canceled:true};const bytes=await win.webContents.printToPDF({landscape:true,pageSize:'A4',preferCSSPageSize:true,printBackground:true,displayHeaderFooter:false,margins:{top:0,bottom:0,left:0,right:0}});await fs.writeFile(result.filePath,bytes);return {canceled:false};}catch(e){return {error:e.message};}
@@ -32,7 +40,7 @@ function createWindow(){
  win.loadURL(origin+'/index.html');
  const click=id=>{if(win&&!win.isDestroyed())win.webContents.executeJavaScript(`document.getElementById(${JSON.stringify(id)})?.click()`).catch(()=>{});};
  Menu.setApplicationMenu(Menu.buildFromTemplate([
-  {label:'文件',submenu:[{label:'新建 SOP',click:()=>click('newBtn')},{label:'打开项目 / 导入 Word',accelerator:'CmdOrCtrl+O',click:()=>click('importBtn')},{label:'保存',accelerator:'CmdOrCtrl+S',click:()=>click('saveBtn')},{label:'另存为',accelerator:'CmdOrCtrl+Shift+S',click:()=>click('saveAsBtn')},{label:'导出 Word',click:()=>click('docxBtn')},{label:'预览 / PDF',click:()=>click('pdfBtn')},{type:'separator'},{label:'退出',click:()=>win.close()}]},
+  {label:'文件',submenu:[{label:'新建 SOP',click:()=>click('newBtn')},{label:'打开项目 / 导入 Word',accelerator:'CmdOrCtrl+O',click:()=>click('importBtn')},{label:'保存',accelerator:'CmdOrCtrl+S',click:()=>click('saveBtn')},{label:'另存为',accelerator:'CmdOrCtrl+Shift+S',click:()=>click('saveAsBtn')},{label:'打开项目文件夹',click:()=>click('projectFolderBtn')},{label:'导出 Word',click:()=>click('docxBtn')},{label:'预览 / PDF',click:()=>click('pdfBtn')},{type:'separator'},{label:'退出',click:()=>win.close()}]},
   {label:'编辑',submenu:[{role:'undo',label:'撤销输入'},{role:'redo',label:'重做输入'},{type:'separator'},{role:'cut',label:'剪切'},{role:'copy',label:'复制'},{role:'paste',label:'粘贴'},{role:'selectAll',label:'全选'}]},
   {label:'视图',submenu:[{role:'resetZoom',label:'实际大小'},{role:'zoomIn',label:'放大'},{role:'zoomOut',label:'缩小'},{role:'togglefullscreen',label:'全屏'}]},
   {label:'帮助',submenu:[{label:'检查软件更新',click:()=>{win.webContents.executeJavaScript("window.dispatchEvent(new Event('sop:show-updates'))").catch(()=>{});}},{type:'separator'},{label:'使用说明',click:()=>click('helpBtn')},{label:'关于 SOP 工作台',click:()=>dialog.showMessageBox(win,{type:'info',title:'SOP 工作台',message:'SOP 工作台 '+app.getVersion(),detail:'离线编写 · 自定义公司格式 · 可编辑 Word 导出\n项目仅保存在本机。使用保存或另存为保留 .sop.json 项目文件。'})}]}
