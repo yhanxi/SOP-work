@@ -458,8 +458,53 @@ function open(input,{title='图文画布',flow=false,photos=[],availableHeight,p
   if(drawingHeight){const sheet=q('svg'),background=[...sheet.children].find(n=>n.tagName==='rect');sheet.style.minHeight='0';background.setAttribute('fill','#dfe7ea');background.insertAdjacentHTML('afterend',`<rect data-drawing-area width="${m.width}" height="${drawingHeight}" fill="white" stroke="#9cbfc0" stroke-dasharray="5 3" pointer-events="none"/>`);}if(snap){const sheet=q('svg'),target=m.objects.find(o=>o.id===snap.targetId),unit=m.width/sheet.getBoundingClientRect().width;sheet.insertAdjacentHTML('beforeend',`<g class="snap-guide" data-snap-kind="${snap.kind}" pointer-events="none" aria-hidden="true">${anchorPoints(target).map(a=>`<circle cx="${a.x}" cy="${a.y}" r="${2.5*unit}" fill="white" stroke="#0d9692" stroke-width="${unit}"/>`).join('')}<circle data-snap-active cx="${snap.x}" cy="${snap.y}" r="${6*unit}" fill="#e1f7f4" stroke="#0d9692" stroke-width="${2*unit}"/></g>`);}}
  function draw(){drawStage();const o=m.objects.find(o=>o.id===selected),e=m.edges.find(e=>e.id===selected);q('[data-action="undo"]').disabled=!history.length;q('[data-action="copy"]').disabled=!(o||picked.some(key=>m.objects.some(node=>node.id===key)));
   q('[data-action="delete"]').disabled=!(selected||picked.length);
-  q('.object-properties').innerHTML=picked.length?`<strong>已选中 ${picked.length} 个元素</strong><p>拖动选中的节点可一起移动，也可复制、删除或撤销。</p>`:o?`<strong>对象属性</strong><label>文字<textarea data-prop="text">${esc(o.text)}</textarea></label>${o.processId?'<small>文字关联 SOP 工序。修改文字后转为自定义。</small>':''}<label>形状<select data-prop="type">${(o.type==='photo'?['photo']:(o.type==='text'?['text','rect','ellipse','diamond','triangle','arrow','line']:['rect','ellipse','diamond','triangle','arrow','line'])).map(t=>`<option value="${t}" ${t===o.type?'selected':''}>${({photo:'照片',text:'文字框',rect:'矩形',ellipse:'椭圆',diamond:'菱形',triangle:'三角形',arrow:'箭头',line:'直线'})[t]}</option>`).join('')}</select></label>${(['arrow','line','photo'].includes(o.type)?[]:['fontSize']).map(k=>`<label>字号<input data-prop="${k}" type="number" value="${o[k]}"></label>`).join('')}${['arrow','line'].includes(o.type)?`<div class="line-endpoints"><label>角度（°）<input data-line-angle type="number" step="0.1" value="${Number(lineAngle(o).toFixed(1))}"></label><label>长度<input data-line-length type="number" min="1" step="0.1" value="${Number(Math.hypot(o.w,o.h).toFixed(1))}"></label><small>拖动两端圆点调整方向；靠近角点或中点约 10px 时连接并跟随；拖离解除，按住 Alt 自由定位。</small></div>`:''}${o.type!=='photo'?`<label>线条粗细<input data-prop="strokeWidth" type="number" min="0.5" max="20" step="0.5" value="${o.strokeWidth}"></label>`:''}<div data-object-color></div><div data-object-fill></div>${['arrow','line'].includes(o.type)?'<button data-flip="flipX">左右翻转箭头</button><button data-flip="flipY">上下翻转箭头</button>':''}`:e?`<strong>连接线</strong><label>分支标签<input data-edge-label value="${esc(e.label)}"></label><label>线条粗细<input data-edge-width type="number" min="0.5" max="20" step="0.5" value="${e.strokeWidth}"></label>${e.join?'<small>拖动线末端圆点可沿主线移动汇入位置。</small>':`<label>走线<select data-edge-route><option value="" ${!e.route?'selected':''}>直线</option><option value="down" ${e.route==='down'?'selected':''}>直角折线（上下接入）</option><option value="across" ${e.route==='across'?'selected':''}>直角折线（左右接入）</option></select></label><small>拖动连线上的圆点调整走线。</small>`}<div data-edge-color></div><small>可拖动标签。移动关联节点时连线自动跟随。</small>`:'<strong>页面对象</strong><p>点击文字、照片、形状或连线进行编辑。</p>';
+  q('.object-properties').innerHTML=picked.length?`<strong>已选中 ${picked.length} 个元素</strong><p>拖动选中的节点可一起移动，也可复制、删除或撤销。</p>`:o?`<strong>对象属性</strong><label>文字<textarea data-prop="text">${esc(o.text)}</textarea></label>${o.processId?'<small>文字关联 SOP 工序。修改文字后转为自定义。</small>':''}<label>形状<select data-prop="type">${(o.type==='photo'?['photo']:(o.type==='text'?['text','rect','ellipse','diamond','triangle','arrow','line']:['rect','ellipse','diamond','triangle','arrow','line'])).map(t=>`<option value="${t}" ${t===o.type?'selected':''}>${({photo:'照片',text:'文字框',rect:'矩形',ellipse:'椭圆',diamond:'菱形',triangle:'三角形',arrow:'箭头',line:'直线'})[t]}</option>`).join('')}</select></label>${(['arrow','line','photo'].includes(o.type)?[]:['fontSize']).map(k=>`<label>字号<input data-prop="${k}" type="number" value="${o[k]}"></label>`).join('')}${['arrow','line'].includes(o.type)?`<div class="line-endpoints"><label>角度（°）<input data-line-angle type="number" step="0.1" value="${Number(lineAngle(o).toFixed(1))}"></label><label>长度<input data-line-length type="number" min="1" step="0.1" value="${Number(Math.hypot(o.w,o.h).toFixed(1))}"></label><small>拖动两端圆点调整方向；靠近角点或中点约 10px 时连接并跟随；拖离解除，按住 Alt 自由定位。</small></div>`:''}${o.type!=='photo'?`<label>线条粗细<input data-prop="strokeWidth" type="number" min="0.5" max="20" step="0.5" value="${o.strokeWidth}"></label>`:''}${o.type==='photo'?'<label>旋转角度（°）<input data-photo-angle type="number" min="-180" max="180" step="0.1" value="0"></label><input data-photo-slider type="range" aria-label="旋转角度" min="-180" max="180" value="0"><button type="button" data-rotate-photo>应用旋转</button><small>正数向右旋转。距直角 4° 以内自动吸附。</small>':''}<div data-object-color></div><div data-object-fill></div>${['arrow','line'].includes(o.type)?'<button data-flip="flipX">左右翻转箭头</button><button data-flip="flipY">上下翻转箭头</button>':''}`:e?`<strong>连接线</strong><label>分支标签<input data-edge-label value="${esc(e.label)}"></label><label>线条粗细<input data-edge-width type="number" min="0.5" max="20" step="0.5" value="${e.strokeWidth}"></label>${e.join?'<small>拖动线末端圆点可沿主线移动汇入位置。</small>':`<label>走线<select data-edge-route><option value="" ${!e.route?'selected':''}>直线</option><option value="down" ${e.route==='down'?'selected':''}>直角折线（上下接入）</option><option value="across" ${e.route==='across'?'selected':''}>直角折线（左右接入）</option></select></label><small>拖动连线上的圆点调整走线。</small>`}<div data-edge-color></div><small>可拖动标签。移动关联节点时连线自动跟随。</small>`:'<strong>页面对象</strong><p>点击文字、照片、形状或连线进行编辑。</p>';
   if(o){SOP_COLORS.mount(q('[data-object-color]'),{label:'文字 / 线条',value:o.color,onChange:color=>{push();o.color=color;remember(o);draw();}});SOP_COLORS.mount(q('[data-object-fill]'),{label:'填充',value:o.fill,transparent:true,onChange:color=>{push();o.fill=color;remember(o);draw();}});}if(e)SOP_COLORS.mount(q('[data-edge-color]'),{label:'连线颜色',value:e.color,onChange:color=>{push();e.color=color;remember({...e,type:'edge'});draw();}});if(q('[data-line-angle]'))q('[data-line-angle]').onchange=ev=>{push();delete o.attachments;setLineAngle(o,ev.target.value,bounds());draw();};if(q('[data-line-length]'))q('[data-line-length]').onchange=ev=>{push();delete o.attachments;setLineAngle(o,lineAngle(o),bounds(),ev.target.value);draw();};
+  const angleInput=q('[data-photo-angle]'), slider=q('[data-photo-slider]'), rotateButton=q('[data-rotate-photo]');
+  if(slider)slider.oninput=()=>{angleInput.value=slider.value;};
+  if(angleInput)angleInput.oninput=()=>{slider.value=angleInput.value;};
+  if(rotateButton)rotateButton.onclick=async()=>{
+   const button=rotateButton, source=o.data, rendered=o.rendered;
+   const raw=Number(angleInput.value), rightAngle=Math.round(raw/90)*90;
+   if(!angleInput.reportValidity())return;
+   const degrees=Math.abs(raw-rightAngle)<=4?rightAngle:raw;
+   if(!degrees)return;
+   const angle=degrees*Math.PI/180, cos=Math.cos(angle), sin=Math.sin(angle);
+   const size=(w,h)=>[Math.abs(cos)*w+Math.abs(sin)*h,Math.abs(sin)*w+Math.abs(cos)*h];
+   async function rotate(data){
+    const image=new Image();
+    image.src=data;
+    await image.decode();
+    const canvas=document.createElement('canvas');
+    const [width,height]=size(image.naturalWidth,image.naturalHeight);
+    canvas.width=Math.ceil(width-1e-8);canvas.height=Math.ceil(height-1e-8);
+    const ctx=canvas.getContext('2d');
+    ctx.translate(canvas.width/2,canvas.height/2);
+    ctx.rotate(angle);
+    ctx.drawImage(image,-image.naturalWidth/2,-image.naturalHeight/2);
+    const result=canvas.toDataURL('image/png');
+    if(result==='data:,')throw Error('图片尺寸过大');
+    return result;
+   }
+   try {
+    const data=await rotate(source);
+    const rotatedPreview=rendered&&rendered!==source?await rotate(rendered):undefined;
+    if(!button.isConnected||m.objects.find(item=>item.id===selected)!==o||o.data!==source)return;
+    push();
+    o.data=data;
+    o.rendered=rotatedPreview;
+    const [w,h]=size(o.w,o.h);
+    const rotatePoint=(x,y)=>[.5+((x-.5)*o.w*cos-(y-.5)*o.h*sin)/w,.5+((x-.5)*o.w*sin+(y-.5)*o.h*cos)/h];
+    for(const mark of o.marks||[]){
+     const end=rotatePoint(mark.x2??mark.x,mark.y2??mark.y);
+     [mark.x,mark.y]=rotatePoint(mark.x,mark.y);
+     [mark.x2,mark.y2]=end;
+    }
+    [o.w,o.h]=[w,h];
+    o.aspectRatio=o.w/o.h;
+    draw();
+   } catch {if(button.isConnected)button.textContent='旋转失败，请重试';}
+  };
   q('.object-properties').querySelectorAll('[data-prop]').forEach(el=>el.onchange=()=>{push();if(el.dataset.prop==='text'){delete o.processId;delete o.prefix;}o[el.dataset.prop]=['fontSize','strokeWidth'].includes(el.dataset.prop)?Number(el.value):el.value;m=normalize(m);remember(m.objects.find(v=>v.id===selected));draw();});if(q('[data-edge-width]'))q('[data-edge-width]').onchange=ev=>{push();e.strokeWidth=Math.max(.5,Math.min(20,finite(ev.target.value,2)));remember({...e,type:'edge'});draw();};if(q('[data-edge-route]'))q('[data-edge-route]').onchange=ev=>{push();e.route=ev.target.value;delete e.bend;draw();};if(q('[data-edge-label]'))q('[data-edge-label]').onchange=ev=>{push();e.label=ev.target.value;draw();};q('.object-properties').querySelectorAll('[data-flip]').forEach(b=>b.onclick=()=>{push();delete o.attachments;o[b.dataset.flip]=!o[b.dataset.flip];draw();});if(q('[data-transparent]'))q('[data-transparent]').onclick=()=>{push();o.fill='transparent';remember(o);draw();};
  }
  function finishInline(commit=true){
