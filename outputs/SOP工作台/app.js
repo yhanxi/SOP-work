@@ -12,7 +12,87 @@ function toast(msg,error=false){const t=$('#toast');t.textContent=msg;t.classLis
 function snapshot(){undo.push({project:clone(project),selected});if(undo.length>18)undo.shift();$('#undoBtn').disabled=false;}
 function page(){if(String(selected).startsWith('front:'))return null;return project.pages.find(p=>p.id===selected)||project.pages[0];}
 function textStyle(p,key){const v=p.contentStyle||p.textStyles?.[key]||{},number=(x,f,min,max)=>Number.isFinite(Number(x))?Math.max(min,Math.min(max,Number(x))):f;return {fontSize:number(v.fontSize,10.5,6,36),letterSpacing:number(v.letterSpacing,0,-1,10)};}
-function styledParagraph(p,key,text){const f=textStyle(p,key);return '<p data-text-section="'+key+'" style="font-size:'+f.fontSize+'pt;letter-spacing:'+f.letterSpacing+'pt">'+esc(text)+'</p>';}
+function textColors(page,key,kind){
+ const text=String(page[key]||''), mask=Array(text.length).fill('');
+ for(const range of Array.isArray(page[key+kind])?page[key+kind]:[]){
+  if(Array.isArray(range)&&Number.isInteger(range[0])&&Number.isInteger(range[1])&&range[0]>=0&&range[1]<=text.length){
+   const color=range[2]??(kind==='Highlights'?'#ffff00':'');
+   if(SOP_COLORS.valid(color))mask.fill(color,range[0],range[1]);
+  }
+ }
+ return mask;
+}
+function saveTextColors(page,key,kind,mask){
+ const ranges=[];
+ for(let i=0;i<mask.length;i++){
+  if(!mask[i])continue;
+  const start=i;
+  while(mask[i+1]===mask[start])i++;
+  ranges.push([start,i+1,mask[start]]);
+ }
+ if(ranges.length)page[key+kind]=ranges;
+ else delete page[key+kind];
+}
+function bodyLines(page,key){
+ const backgrounds=textColors(page,key,'Highlights'), foregrounds=textColors(page,key,'TextColors');
+ let offset=0;
+ return String(page[key]||'').split('\n').map(text=>{
+  const runs=[];
+  for(let start=0;start<text.length;){
+   const background=backgrounds[offset+start], color=foregrounds[offset+start];
+   let end=start+1;
+   while(end<text.length&&backgrounds[offset+end]===background&&foregrounds[offset+end]===color)end++;
+   runs.push({text:text.slice(start,end),background,color});
+   start=end;
+  }
+  offset+=text.length+1;
+  return text.trim()?runs:null;
+ }).filter(Boolean);
+}
+function styledParagraph(p,key,runs){
+ const f=textStyle(p,key);
+ const html=runs.map(({text,color,background})=>color||background
+  ?'<span style="color:'+(color||'inherit')+';background-color:'+(background||'transparent')+'">'+esc(text)+'</span>'
+  :esc(text)).join('');
+ return '<p data-text-section="'+key+'" style="font-size:'+f.fontSize+'pt;letter-spacing:'+f.letterSpacing+'pt">'+html+'</p>';
+}
+function highlightControls(key){
+ return '<div class="row"><div data-text-color="'+key+'"></div><div data-text-background="'+key+'"></div></div>';
+}
+function bindBodyText(input,p,key){
+ bindInput(input,value=>{
+  const old=p[key];
+  let start=0,tail=0;
+  while(start<Math.min(old.length,value.length)&&old[start]===value[start])start++;
+  while(tail<Math.min(old.length,value.length)-start&&old[old.length-1-tail]===value[value.length-1-tail])tail++;
+  for(const kind of ['TextColors','Highlights']){
+   if(!p[key+kind]?.length)continue;
+   const mask=textColors(p,key,kind);
+   const next=mask.slice(0,start).concat(Array(value.length-start-tail).fill(''),mask.slice(old.length-tail));
+   saveTextColors(p,key,kind,next);
+  }
+  p[key]=value;
+ });
+ for(const [selector,kind,label,clearLabel] of [
+  ['data-text-color','TextColors','文字颜色','恢复默认文字颜色'],
+  ['data-text-background','Highlights','文字底色','无底色']
+ ]){
+  const host=$('['+selector+'="'+key+'"]');
+  if(!host)continue;
+  SOP_COLORS.mount(host,{label,value:'transparent',transparent:true,clearLabel,onChange:color=>{
+   const {selectionStart:start,selectionEnd:end}=input;
+   if(start===end)return toast('请先在正文输入框中选中文字。');
+   snapshot();
+   const mask=textColors(p,key,kind);
+   mask.fill(color==='transparent'?'':color.toLowerCase(),start,end);
+   saveTextColors(p,key,kind,mask);
+   input.focus();
+   input.setSelectionRange(start,end);
+   changed();
+   refresh();
+  }});
+ }
+}
 function textControls(p){const f=textStyle(p,'steps'),fixed=p.fixed.includes('contentStyle'),disabled=fixed?' disabled':'';return `<div class="field shared-text-format"><div class="field-top"><strong>正文文字格式</strong><button class="pin ${fixed?'pinned':''}" data-pin="contentStyle" title="只固定字号与字间距，不固定文字内容">${fixed?'● 格式已固定 · 解锁':'固定格式'}</button></div><div class="text-format-controls"><label title="单位：磅">字号<input type="number" min="6" max="36" step="0.5" data-text-format="content" data-style-key="fontSize" value="${f.fontSize}"${disabled}></label><label title="单位：磅；0 为标准字间距">字间距<input type="number" min="-1" max="10" step="0.1" data-text-format="content" data-style-key="letterSpacing" value="${f.letterSpacing}"${disabled}></label></div><small>操作步骤、工艺技术要求共用；文字内容分别固定。</small></div>`;}
 
 function blankPage(processId){return {id:uid(),processId:processId||uid(),name:'新工序',signoff:{author:'',authorDate:'',reviewer:'',reviewerDate:'',approver:'',approverDate:'',version:''},fitSinglePage:false,station:'',duration:'',people:'',steps:'',requirements:'',notes:'',photos:[],materials:[],checks:[],fixed:[]};}
@@ -37,9 +117,9 @@ function filename(){return (project.meta.product+'_'+project.meta.title+'_'+proj
 function drawMarks(ctx,marks,w,h){for(const m of marks||[]){const x=m.x*w,y=m.y*h,x2=m.x2*w,y2=m.y2*h;ctx.strokeStyle=m.color||'#e22d32';ctx.fillStyle=m.color||'#e22d32';ctx.lineWidth=Math.max(2,w/260);ctx.lineCap='round';if(m.type==='rect'){ctx.strokeRect(Math.min(x,x2),Math.min(y,y2),Math.abs(x2-x),Math.abs(y2-y));}else if(m.type==='line'){ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(x2,y2);ctx.stroke();}else if(m.type==='arrow'){ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(x2,y2);ctx.stroke();const a=Math.atan2(y2-y,x2-x),size=Math.max(9,w/35);ctx.beginPath();ctx.moveTo(x2,y2);ctx.lineTo(x2-size*Math.cos(a-.48),y2-size*Math.sin(a-.48));ctx.lineTo(x2-size*Math.cos(a+.48),y2-size*Math.sin(a+.48));ctx.closePath();ctx.fill();}else if(m.type==='circle'){ctx.beginPath();ctx.ellipse((x+x2)/2,(y+y2)/2,Math.max(1,Math.abs(x2-x)/2),Math.max(1,Math.abs(y2-y)/2),0,0,Math.PI*2);ctx.stroke();}else if(m.type==='text'){const size=w*(Number(m.fontSize)||1/28);ctx.font=`600 ${size}px "Microsoft YaHei",sans-serif`;const t=String(m.text||'标注');const tw=ctx.measureText(t).width;if(m.background!=='transparent'){ctx.fillStyle=m.background||'#fff7b7';const pad=w/200;ctx.fillRect(x-pad,y-size,tw+pad*2,size*1.4);}ctx.fillStyle=m.color||'#e22d32';ctx.fillText(t,x,y);}}}
 async function loadImage(data){return new Promise((resolve,reject)=>{const im=new Image();im.onload=()=>resolve(im);im.onerror=()=>reject(Error('无法读取图片，请使用 PNG、JPEG 或 WebP。'));im.src=data;});}
 async function annotated(photo){const key=photo.data+'|'+JSON.stringify(photo.marks||[]);if(imageCache.has(key))return imageCache.get(key);if(!photo.marks?.length)return photo.data;const im=await loadImage(photo.data),c=document.createElement('canvas');const scale=Math.max(1,1600/im.naturalWidth);c.width=Math.round(im.naturalWidth*scale);c.height=Math.round(im.naturalHeight*scale);const ctx=c.getContext('2d');ctx.drawImage(im,0,0,c.width,c.height);drawMarks(ctx,photo.marks,c.width,c.height);const result=c.toDataURL('image/png');imageCache.set(key,result);if(imageCache.size>150)imageCache.delete(imageCache.keys().next().value);return result;}
-function canvasText(p,key){if(key==='requirements'&&!String(p[key]||'').trim())return '';const heading=key==='steps'?'一、操作步骤':'二、工艺技术要求';return '<section class="op-text-section"><h3>'+heading+'</h3>'+String(p[key]||'').split('\n').filter(x=>x.trim()).map(t=>styledParagraph(p,key,t)).join('')+'</section>';}
+function canvasText(p,key){if(key==='requirements'&&!String(p[key]||'').trim())return '';const heading=key==='steps'?'一、操作步骤':'二、工艺技术要求';return '<section class="op-text-section"><h3>'+heading+'</h3>'+bodyLines(p,key).map(runs=>styledParagraph(p,key,runs)).join('')+'</section>';}
 function canvasSpace(p,model=p.canvas){const host=$('#measureRoot'),wide=A.layout==='wide-v2',widthMm=wide?273.05*.64:273.05*.474,heightMm=wide?162.63:122,padMm=wide?1.3:2;host.innerHTML='<div class="op-cell" style="display:flow-root;width:'+widthMm+'mm;padding:'+padMm+'mm"><div>'+canvasText(p,'steps')+canvasText(p,'requirements')+'</div></div>';const box=host.firstElementChild,inner=box.firstElementChild,style=getComputedStyle(box),width=box.getBoundingClientRect().width-parseFloat(style.paddingLeft)-parseFloat(style.paddingRight),available=Math.max(0,(heightMm-padMm*2)*96/25.4-inner.getBoundingClientRect().height-2);host.replaceChildren();return {height:available*(model?.width||900)/width,pixels:available,textOverflow:available<=0};}
-function opHtml(p,measure=false){if(p.canvas){const space=canvasSpace(p);return '<div class="manual-op-layout">'+canvasText(p,'steps')+'<div class="page-object-content" style="height:'+space.pixels+'px;overflow:hidden">'+(space.height>0?window.SOP_OBJECTS.svg(p.canvas,'',false,{viewHeight:space.height}):'')+'</div>'+canvasText(p,'requirements')+'</div>';}if(window.SOP_IMPORT?.active(p))return window.SOP_IMPORT.preview(p);let s='';if(p.steps.trim())s+='<h3>一、操作步骤</h3>'+p.steps.split('\n').filter(x=>x.trim()).map(x=>styledParagraph(p,'steps',x)).join('');if(p.photos.length){s+='<div class="op-images">'+p.photos.map(ph=>'<figure class="op-image">'+(measure?'<div class="op-photo-placeholder"></div>':`<img src="${esc(ph.rendered||ph.data)}" alt="${esc(ph.caption||'作业图片')}">`)+`<figcaption>${esc(ph.caption||'')}</figcaption></figure>`).join('')+'</div>';}if(p.requirements.trim())s+='<h3 class="requirement-title">二、工艺技术要求</h3>'+p.requirements.split('\n').filter(x=>x.trim()).map(x=>styledParagraph(p,'requirements',x)).join('');if(p.standardText)s+='<p>'+esc(p.standardText)+'</p>';return s;}
+function opHtml(p,measure=false){if(p.canvas){const space=canvasSpace(p);return '<div class="manual-op-layout">'+canvasText(p,'steps')+'<div class="page-object-content" style="height:'+space.pixels+'px;overflow:hidden">'+(space.height>0?window.SOP_OBJECTS.svg(p.canvas,'',false,{viewHeight:space.height}):'')+'</div>'+canvasText(p,'requirements')+'</div>';}if(window.SOP_IMPORT?.active(p))return window.SOP_IMPORT.preview(p);let s='';if(p.steps.trim())s+='<h3>一、操作步骤</h3>'+bodyLines(p,'steps').map(runs=>styledParagraph(p,'steps',runs)).join('');if(p.photos.length){s+='<div class="op-images">'+p.photos.map(ph=>'<figure class="op-image">'+(measure?'<div class="op-photo-placeholder"></div>':`<img src="${esc(ph.rendered||ph.data)}" alt="${esc(ph.caption||'作业图片')}">`)+`<figcaption>${esc(ph.caption||'')}</figcaption></figure>`).join('')+'</div>';}if(p.requirements.trim())s+='<h3 class="requirement-title">二、工艺技术要求</h3>'+bodyLines(p,'requirements').map(runs=>styledParagraph(p,'requirements',runs)).join('');if(p.standardText)s+='<p>'+esc(p.standardText)+'</p>';return s;}
 function paginateOne(p){const space=p.canvas?canvasSpace(p):null;return [{...p,...(space?{canvasHeight:space.height,canvasHeightPt:space.pixels*.75}:{}),fitSinglePage:false,fitScale:1,importedPreviewScale:1,manualSinglePage:true,sourceId:p.id,fragment:0,id:p.id+':0',standardText:window.SOP_IMPORT?.active(p)||A.layout==='wide-v2'?'':project.settings.standardText||''}];}
 function uniqueProcesses(){const ids=new Set();return project.pages.filter(p=>{if(ids.has(p.processId))return false;ids.add(p.processId);return true;});}
 function recalc(){const ids=new Map();let n=0;layout=project.pages.flatMap(p=>paginateOne(p));for(const p of layout){p.isContinuation=ids.has(p.processId);if(!ids.has(p.processId))ids.set(p.processId,++n);p.processNo=ids.get(p.processId);}front=[];if(project.settings.cover)front.push({kind:'cover'});if(project.settings.history)front.push({kind:'history'});if(project.settings.flow){const processes=flowNodes();for(let i=0;i<((project.originalFront?.flow&&project.frontContent?.flowMode!=='editable')||project.frontContent?.flowGraph?1:Math.max(1,Math.ceil(processes.length/24)));i++)front.push({kind:'flow',chunk:i});}const ordered=orderedPages();layout=ordered.filter(x=>x.kind==='body').map(x=>x.page);for(let i=0;i<layout.length;i++){layout[i].bodyNo=i+1;layout[i].pageNo=i+1;layout[i].total=layout.length;}$('#measureRoot').replaceChildren();}
@@ -161,10 +241,10 @@ function renderFrontEditor(kind){$('.tabs').hidden=true;if(project.originalFront
  $$('[data-front-key]').forEach(input=>bindInput(input,value=>{if(input.dataset.frontTarget==='front')project.frontContent={...project.frontContent,[input.dataset.frontKey]:value};else project[input.dataset.frontTarget][input.dataset.frontKey]=value;}));
 }
 function renderEditor(){if(String(selected).startsWith('front:'))return renderFrontEditor(selected.split(':')[1]);$('.tabs').hidden=false;const p=page();const e=$('#editContent');if(!p){$('#editorTitle').textContent='开始编写 SOP';$('#selectedContext').textContent='';e.innerHTML='<div class="empty-state">点击“新增工序页”，或导入已有 Word / SOP 项目。</div>';return;}$('#editorTitle').textContent=p.name||'未命名工序';$('#selectedContext').textContent='正文工序 · '+(p.fixed.length?p.fixed.length+' 项固定沿用':'内容可编辑');const locked=k=>p.fixed.includes(k)?' readonly':'';
- if(tab==='content'){e.innerHTML=`<div class="field"><label><span>工序名称</span><input id="nameInput" value="${esc(p.name)}"></label></div><div class="field field-grid"><label><span>工位号</span><input data-meta="station" value="${esc(p.station)}"></label><label><span>工时</span><input data-meta="duration" value="${esc(p.duration)}"></label><label><span>人力</span><input data-meta="people" value="${esc(p.people)}"></label></div>${textControls(p)}<div class="field">${fieldTop('操作步骤','steps')}<textarea id="stepsInput" rows="7" style="font-size:${textStyle(p,'steps').fontSize}pt;letter-spacing:${textStyle(p,'steps').letterSpacing}pt"${locked('steps')}>${esc(p.steps)}</textarea></div><div class="field">${fieldTop('作业配图','photos')}<div class="photo-grid" id="photoGrid"></div>${p.fixed.includes('photos')?'':'<div class="field-note">可多选上传，也可以将截图粘贴到此页面。配图按两列排列；超出页面或发生遮挡时，请手动调整。</div><button id="uploadBtn">＋ 添加照片 / 截图</button>'}</div><div class="field">${fieldTop('工艺技术要求 / 验收要点','requirements')}<textarea id="requirementsInput" rows="3" style="font-size:${textStyle(p,'requirements').fontSize}pt;letter-spacing:${textStyle(p,'requirements').letterSpacing}pt"${locked('requirements')}>${esc(p.requirements)}</textarea></div>`;
+ if(tab==='content'){e.innerHTML=`<div class="field"><label><span>工序名称</span><input id="nameInput" value="${esc(p.name)}"></label></div><div class="field field-grid"><label><span>工位号</span><input data-meta="station" value="${esc(p.station)}"></label><label><span>工时</span><input data-meta="duration" value="${esc(p.duration)}"></label><label><span>人力</span><input data-meta="people" value="${esc(p.people)}"></label></div>${textControls(p)}<div class="field">${fieldTop('操作步骤','steps')}<textarea id="stepsInput" rows="7" style="font-size:${textStyle(p,'steps').fontSize}pt;letter-spacing:${textStyle(p,'steps').letterSpacing}pt"${locked('steps')}>${esc(p.steps)}</textarea>${p.fixed.includes('steps')?'':highlightControls('steps')}</div><div class="field">${fieldTop('作业配图','photos')}<div class="photo-grid" id="photoGrid"></div>${p.fixed.includes('photos')?'':'<div class="field-note">可多选上传，也可以将截图粘贴到此页面。配图按两列排列；超出页面或发生遮挡时，请手动调整。</div><button id="uploadBtn">＋ 添加照片 / 截图</button>'}</div><div class="field">${fieldTop('工艺技术要求 / 验收要点','requirements')}<textarea id="requirementsInput" rows="3" style="font-size:${textStyle(p,'requirements').fontSize}pt;letter-spacing:${textStyle(p,'requirements').letterSpacing}pt"${locked('requirements')}>${esc(p.requirements)}</textarea>${p.fixed.includes('requirements')?'':highlightControls('requirements')}</div>`;
 
   $$('[data-text-format]').forEach(el=>{el.onfocus=()=>snapshot();el.oninput=()=>{if(p.fixed.includes('contentStyle'))return;p.contentStyle={...textStyle(p,'steps'),[el.dataset.styleKey]:el.value};p.contentStyle=textStyle(p,'steps');for(const key of ['steps','requirements']){const input=$('#'+key+'Input');input.style.fontSize=p.contentStyle.fontSize+'pt';input.style.letterSpacing=p.contentStyle.letterSpacing+'pt';}changed();};el.onchange=()=>{el.value=textStyle(p,'steps')[el.dataset.styleKey];};});
-  bindInput($('#nameInput'),v=>{p.name=v;project.pages.filter(x=>x.processId===p.processId).forEach(x=>x.name=v);$('#editorTitle').textContent=v;});$$('[data-meta]').forEach(el=>bindInput(el,v=>p[el.dataset.meta]=v));for(const [id,k] of [['stepsInput','steps'],['requirementsInput','requirements']])bindInput($('#'+id),v=>p[k]=v);
+  bindInput($('#nameInput'),v=>{p.name=v;project.pages.filter(x=>x.processId===p.processId).forEach(x=>x.name=v);$('#editorTitle').textContent=v;});$$('[data-meta]').forEach(el=>bindInput(el,v=>p[el.dataset.meta]=v));for(const [id,k] of [['stepsInput','steps'],['requirementsInput','requirements']])bindBodyText($('#'+id),p,k);
   if(window.SOP_IMPORT?.active(p)){e.insertAdjacentHTML('afterbegin','<div class="notice">当前页保留原稿图文及可编辑标注。未改动项目导出 Word 时保留原文档分页；修改步骤、要求或配图后会重新编排，可用撤销恢复。浏览器按工序表格预览，物理页数请在 Word/WPS 中核对。</div>');}
   e.insertAdjacentHTML('afterbegin','<div class="canvas-entry"><strong>图文页面画布</strong><p>照片、文字框与箭头独立摆放，支持照片外留白。</p><button id="editPageCanvas" class="primary">'+(p.canvas?'编辑页面画布':'建立页面画布')+'</button></div>');$('#editPageCanvas').disabled=p.fixed.includes('photos');$('#editPageCanvas').onclick=()=>{if(p.importedContent&&!p.canvas)toast('画布仅载入照片素材；原生标注/复杂图文无法自动迁移。保存后使用重排副本，原稿仍保留，可导出原始 Word。',true);const model=p.canvas||p.canvasDraft||window.SOP_OBJECTS.fromPhotos(p.photos),space=canvasSpace(p,model);if(space.textOverflow)return toast('文字已占满内容框，请先手动调整文字、字号或字间距，留出画布空间。',true);window.SOP_OBJECTS.open(model,{availableHeight:space.height,title:'工序图文画布',onSave:value=>{snapshot();p.canvas=value;p.fitSinglePage=false;renderEditor();changed();refresh();}});};if(p.canvas){e.insertAdjacentHTML('afterbegin','<div class="notice">本页使用独立对象画布。下方显示画布中的照片，可进入画布编辑。<button id="restorePageMaterials">返回原图文排版</button></div>');$('#restorePageMaterials').onclick=()=>{snapshot();p.canvasDraft=p.canvas;delete p.canvas;renderEditor();changed();refresh();};}
   if(p.importedContent&&!window.SOP_IMPORT.active(p))e.insertAdjacentHTML('afterbegin','<div class="notice">当前页为重排副本。无法直接转换的原图文/标注仍保存在项目的原稿中，可撤销或导出原始 Word 查阅。</div>');renderPhotos();if($('#uploadBtn')){
@@ -221,7 +301,7 @@ function editSettings(){const s=project.settings;let pendingLogo=s.logo||'';
  $('#chooseLogo').onclick=()=>$('#logoFile').click();$('#removeLogo').onclick=()=>{pendingLogo='';updateLogo();};
  $('#logoFile').onchange=async e=>{const f=e.target.files[0];if(!f)return;const apply=$('#dialogApply');apply.disabled=true;try{if(!/^image\/(png|jpeg|webp)$/.test(f.type)||f.size>10*1024*1024)throw Error('请选择 10MB 以内的 PNG、JPEG 或 WebP 图片。');const data=await new Promise((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(r.result);r.onerror=()=>reject(Error('Logo 读取失败'));r.readAsDataURL(f);}),im=await loadImage(data);if(im.width*im.height>40000000)throw Error('Logo 分辨率过大，请缩小后上传。');const scale=Math.min(1,1600/Math.max(im.width,im.height)),c=document.createElement('canvas');c.width=Math.max(1,Math.round(im.width*scale));c.height=Math.max(1,Math.round(im.height*scale));c.getContext('2d').drawImage(im,0,0,c.width,c.height);pendingLogo=c.toDataURL('image/png');updateLogo();}catch(err){toast(err.message,true);}finally{apply.disabled=false;e.target.value='';}};
 }
-function addPage(continuation=false){const old=page();snapshot();const p=blankPage(continuation?old?.processId:undefined);if(old){if(continuation){p.name=old.name;p.station=old.station;p.signoff=clone(old.signoff);}for(const k of old.fixed||[]){if(k==='contentStyle'){p.contentStyle=clone(textStyle(old,'steps'));}else p[k]=clone(old[k]);}p.fixed=[...(old.fixed||[])];const i=project.pages.indexOf(old);project.pages.splice(i+1,0,p);}else project.pages.push(p);
+function addPage(continuation=false){const old=page();snapshot();const p=blankPage(continuation?old?.processId:undefined);if(old){if(continuation){p.name=old.name;p.station=old.station;p.signoff=clone(old.signoff);}for(const k of old.fixed||[]){if(k==='contentStyle'){p.contentStyle=clone(textStyle(old,'steps'));}else p[k]=clone(old[k]);if(k==='steps'||k==='requirements'){for(const kind of ['Highlights','TextColors'])if(old[k+kind])p[k+kind]=clone(old[k+kind]);}}p.fixed=[...(old.fixed||[])];const i=project.pages.indexOf(old);project.pages.splice(i+1,0,p);}else project.pages.push(p);
  if(project.signoffDefault){
   p.signoff=clone(project.signoffDefault);
   if(!p.fixed.includes('signoff'))p.fixed.push('signoff');
@@ -287,7 +367,7 @@ if(A.layout==='wide-v2')document.body.classList.add('template-v2');$('#brandLogo
 };document.addEventListener('paste',async e=>{if($('#photoDialog').open||$('#formDialog').open||document.querySelector('.object-dialog[open]'))return;const fs=[...(e.clipboardData?.files||[])].filter(f=>f.type.startsWith('image/'));if(fs.length){e.preventDefault();if(page()?.canvas)return toast('请打开图文画布后粘贴图片。');await addPhotos(fs);}});window.addEventListener('resize',()=>{clearTimeout(refreshTimer);refreshTimer=setTimeout(refresh,100);});
 $('#importFile').onchange=async e=>{const f=e.target.files[0];if(f)await projectFiles.importFile(f);e.target.value='';};
 $('#docxBtn').onclick=async()=>{const b=$('#docxBtn');try{b.disabled=true;b.textContent='生成中…';await prepareImages();recalc();const blob=await window.SOP_WORD.exportDocx(project,layout,front);download(blob,filename()+'.docx');toast('Word 已生成，请打开核对。页码动态域和可再次导入的项目数据已写入。');}catch(e){toast('导出失败：'+e.message,true);}finally{b.disabled=false;b.textContent='导出 Word';}};
-window.SOP={canvasSpace,textStyle,snapshot,changed,renderEditor,moveDocumentPage,orderedPages,moveRenderedPage,get project(){return project;},get layout(){return layout;},get front(){return front;},uid,clone,esc,blankPage,validate,annotated,prepareImages,recalc,refresh,operationPaper,frontPaper,flowImage,toast,download,filename,replaceProject(p){snapshot();project=validate(p);selected=p.pages[0]?.id;renderEditor();changed();refresh();},setSelected(id){selected=id;renderEditor();refresh();}};
+window.SOP={canvasSpace,textStyle,bodyLines,snapshot,changed,renderEditor,moveDocumentPage,orderedPages,moveRenderedPage,get project(){return project;},get layout(){return layout;},get front(){return front;},uid,clone,esc,blankPage,validate,annotated,prepareImages,recalc,refresh,operationPaper,frontPaper,flowImage,toast,download,filename,replaceProject(p){snapshot();project=validate(p);selected=p.pages[0]?.id;renderEditor();changed();refresh();},setSelected(id){selected=id;renderEditor();refresh();}};
 projectFiles=window.SOP_FILES.create({getProject:()=>project,filename,toast,download,stateText:p=>window.SOP_IMPORT.projectState(p),recover:flushSave,applyProject:async(p,commit)=>{const candidate=validate(p);await prepareImages(candidate);await commit();clearTimeout(saveTimer);project=candidate;undo=[];selected=project.pages[0]?.id;renderEditor();changed();refresh();}});
 document.addEventListener('keydown',event=>{if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='s'){event.preventDefault();projectFiles.save(event.shiftKey);}});if(!window.sopDesktop){window.addEventListener('beforeunload',event=>projectFiles.beforeUnload(event));}
 (async()=>{let saved,meta;try{db=await openDb();saved=await dbRead();if(saved){project=validate(saved);selected=project.pages[0]?.id;}meta=await dbRead('fileBinding');autosaveReady=true;document.body.dataset.recovery='saved';}catch(e){document.body.dataset.recovery='failed';}await prepareImages();renderEditor();refresh();await projectFiles.restore(meta,!!saved);})();
