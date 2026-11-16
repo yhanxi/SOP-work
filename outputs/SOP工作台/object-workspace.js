@@ -7,9 +7,9 @@ const styleKey='sop-object-styles-v1';let remembered={};try{remembered=JSON.pars
 function remember(o){remembered[o.type]={fontSize:o.fontSize,color:o.color,fill:o.fill,strokeWidth:o.strokeWidth};try{root.localStorage?.setItem(styleKey,JSON.stringify(remembered));}catch{}}
 
 const finite=(n,f)=>Number.isFinite(Number(n))?Number(n):f;
-function normalize(input){
- const m=clone(input||{width:900,height:520,objects:[],edges:[]});m.width=Math.max(100,Math.min(4000,finite(m.width,900)));m.height=Math.max(100,Math.min(4000,finite(m.height,520)));m.objects=Array.isArray(m.objects)?m.objects:[];m.edges=Array.isArray(m.edges)?m.edges:[];
- const seen=new Set();m.objects=m.objects.filter(o=>['photo','text','rect','ellipse','diamond','triangle','arrow','line'].includes(o.type)).slice(0,300).map(o=>{o.id=o.id&&!seen.has(o.id)?o.id:id();seen.add(o.id);o.w=Math.max(['line','arrow'].includes(o.type)?0:10,Math.min(m.width,finite(o.w,180)));o.h=Math.max(['line','arrow'].includes(o.type)?0:10,Math.min(m.height,finite(o.h,60)));if(['line','arrow'].includes(o.type))o.w=Math.max(0,Math.min(m.width,finite(o.w,180)));o.x=Math.max(0,Math.min(m.width-o.w,finite(o.x,30)));o.y=Math.max(0,Math.min(m.height-o.h,finite(o.y,30)));o.strokeWidth=Math.max(.5,Math.min(20,finite(o.strokeWidth,['arrow','line'].includes(o.type)?3:2)));o.fontSize=Math.max(8,Math.min(80,finite(o.fontSize,20)));o.color=/^#[a-f\d]{6}$/i.test(o.color)?o.color:'#243e46';o.fill=/^#[a-f\d]{6}$/i.test(o.fill)?o.fill:'transparent';o.text=String(o.text||'');if(o.type==='photo'){o.aspectRatio=finite(o.aspectRatio,o.w/Math.max(1,o.h));o.h=o.w/Math.max(.01,o.aspectRatio);if(o.h>m.height-o.y){o.h=m.height-o.y;o.w=o.h*o.aspectRatio;}}if(o.type==='photo'&&!/^data:image\/(png|jpeg|webp);base64,[a-z\d+/=]+$/i.test(o.data||''))throw Error('画布图片必须是本地 PNG、JPEG 或 WebP 数据');return o;});
+function normalize(input,interactive=false){
+ const m=interactive?{...input,objects:input.objects.map(o=>({...o}))}:clone(input||{width:900,height:520,objects:[],edges:[]});m.width=Math.max(100,Math.min(4000,finite(m.width,900)));m.height=Math.max(100,Math.min(4000,finite(m.height,520)));m.objects=Array.isArray(m.objects)?m.objects:[];m.edges=Array.isArray(m.edges)?m.edges:[];
+ const seen=new Set();m.objects=m.objects.filter(o=>['photo','text','rect','ellipse','diamond','triangle','arrow','line'].includes(o.type)).slice(0,300).map(o=>{o.id=o.id&&!seen.has(o.id)?o.id:id();seen.add(o.id);o.w=Math.max(['line','arrow'].includes(o.type)?0:10,Math.min(m.width,finite(o.w,180)));o.h=Math.max(['line','arrow'].includes(o.type)?0:10,Math.min(m.height,finite(o.h,60)));if(['line','arrow'].includes(o.type))o.w=Math.max(0,Math.min(m.width,finite(o.w,180)));o.x=Math.max(0,Math.min(m.width-o.w,finite(o.x,30)));o.y=Math.max(0,Math.min(m.height-o.h,finite(o.y,30)));o.strokeWidth=Math.max(.5,Math.min(20,finite(o.strokeWidth,['arrow','line'].includes(o.type)?3:2)));o.fontSize=Math.max(8,Math.min(80,finite(o.fontSize,20)));o.color=/^#[a-f\d]{6}$/i.test(o.color)?o.color:'#243e46';o.fill=/^#[a-f\d]{6}$/i.test(o.fill)?o.fill:'transparent';o.text=String(o.text||'');if(o.type==='photo'){o.aspectRatio=finite(o.aspectRatio,o.w/Math.max(1,o.h));o.h=o.w/Math.max(.01,o.aspectRatio);if(o.h>m.height-o.y){o.h=m.height-o.y;o.w=o.h*o.aspectRatio;}}if(!interactive&&o.type==='photo'&&!/^data:image\/(png|jpeg|webp);base64,[a-z\d+/=]+$/i.test(o.data||''))throw Error('画布图片必须是本地 PNG、JPEG 或 WebP 数据');return o;});
  const direct=new Set(m.edges.filter(e=>!e.join&&seen.has(e.from)&&seen.has(e.to)&&e.from!==e.to).map(e=>e.id));
  m.edges=m.edges.filter(e=>seen.has(e.from)&&(e.join?direct.has(e.join):seen.has(e.to)&&e.from!==e.to)).map(e=>({...e,id:e.id||id(),label:String(e.label||''),strokeWidth:Math.max(.5,Math.min(20,finite(e.strokeWidth,2))),color:/^#[a-f\d]{6}$/i.test(e.color)?e.color:'#243e46'}));syncConnections(m);return m;
 }
@@ -409,7 +409,7 @@ function restorePhotoCaptions(input,photos){
 function fromProcesses(pages){const m={width:1000,height:650,objects:[],edges:[]},seen=new Set();pages.filter(p=>{if(seen.has(p.processId))return false;seen.add(p.processId);return true;}).forEach((p,i)=>{m.objects.push({id:id(),type:'rect',text:p.name,x:60+Math.floor(i/6)*240,y:30+(i%6)*95,w:200,h:60,fill:'#ffffff'});if(i)m.edges.push({id:id(),from:m.objects[i-1].id,to:m.objects[i].id,label:''});});if(m.objects.length>24)throw Error('从工序生成最多支持24个节点；请拆分为多个流程或在画布手动添加。');return normalize(m);}
 // Occupied bounds detect elements outside the remaining page area without resizing them.
 function contentHeight(model){const m=normalize(model);return m.objects.reduce((bottom,o)=>{let edge=o.y+o.h;if(o.type==='photo'&&o.caption)edge+=4+17*wrapText(o.caption,o.w,14).length;if(!['photo','arrow','line'].includes(o.type)&&o.text){const lines=wrapText(o.text,o.w,o.fontSize);edge=Math.max(edge,o.y+o.h/2+(lines.length-1)*o.fontSize*.6+o.fontSize*.7);}return Math.max(bottom,edge+(['arrow','line'].includes(o.type)?Math.max(8,o.strokeWidth*3.5):8));},0);}
-function svg(model,selection='',editing=false,{viewHeight,picked=[]}={}){const m=normalize(model),height=Number.isFinite(viewHeight)?Math.max(1,viewHeight):m.height,marker='sop-object-arrow-'+(++renderId);let out=`<svg class="object-sheet" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${m.width} ${height}" role="img" aria-label="独立对象画布"><defs><marker id="${marker}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#243e46"/></marker></defs><rect width="${m.width}" height="${height}" fill="white"/>`;
+function svg(model,selection='',editing=false,{viewHeight,picked=[],imageSource=o=>o.rendered||o.data,live=false}={}){const m=normalize(model,live),height=Number.isFinite(viewHeight)?Math.max(1,viewHeight):m.height,marker='sop-object-arrow-'+(++renderId);let out=`<svg class="object-sheet" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${m.width} ${height}" role="img" aria-label="独立对象画布"><defs><marker id="${marker}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#243e46"/></marker></defs><rect width="${m.width}" height="${height}" fill="white"/>`;
  const edgeLabels=[],edgeHandles=[];
  for(const e of m.edges){
   const points=flowRoute(m,e);
@@ -431,7 +431,7 @@ function svg(model,selection='',editing=false,{viewHeight,picked=[]}={}){const m
  }
  for(const o of m.objects){const objectMarker=marker+'-'+String(o.id).replace(/[^a-z0-9]/gi,'');out+=`<defs><marker id="${objectMarker}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="${o.color}"/></marker></defs>`;out+=`<g data-object="${esc(o.id)}" transform="translate(${o.x} ${o.y})">`;const style=`fill="${o.fill}" stroke="${o.color}" stroke-width="${o.strokeWidth}"`;
   if(o.type==='photo'){
-   out+=`<image href="${esc(o.rendered||o.data)}" width="${o.w}" height="${o.h}" preserveAspectRatio="xMidYMid meet"/>`;
+   out+=`<image href="${esc(imageSource(o))}" width="${o.w}" height="${o.h}" preserveAspectRatio="xMidYMid meet"/>`;
    if(o.caption)out+=`<text x="${o.w/2}" y="${o.h+4}" dominant-baseline="hanging" text-anchor="middle" font-size="14" fill="#111" pointer-events="${editing?'visiblePainted':'none'}">${wrapText(o.caption,o.w,14).map((text,i)=>`<tspan x="${o.w/2}" dy="${i?17:0}">${esc(text)}</tspan>`).join('')}</text>`;
   }
   else if(['arrow','line'].includes(o.type))out+=`<line x1="${o.flipX?o.w:0}" y1="${o.flipY?o.h:0}" x2="${o.flipX?0:o.w}" y2="${o.flipY?0:o.h}" stroke="${o.color}" stroke-width="${o.strokeWidth}" ${o.type==='arrow'?`marker-end="url(#${objectMarker})"`:''}/>`;
@@ -447,7 +447,36 @@ function open(input,{title='图文画布',flow=false,photos=[],availableHeight,p
  const drawingHeight=Number.isFinite(availableHeight)?Math.max(1,availableHeight):null;if(drawingHeight)m.height=Math.max(m.height,drawingHeight);const bounds=()=>({width:m.width,height:drawingHeight??m.height});
  d.innerHTML=`<div class="dialog-head"><div><h2>${esc(title)}</h2><small>选择形状后在画布按下并拖动绘制，松开完成，Esc 取消。拖动对象移动，四角均可缩放；箭头端点吸附后跟随目标移动、缩放；拖离可解除连接。双击形状可直接编辑文字。${flow?' 拖空白处框选。靠近对齐位置会吸附，按 Alt 自由移动。':' 复制图片后，可按 Ctrl+V 粘贴到画布。'}</small></div><button data-action="close">取消</button></div><div class="object-tools"><button data-add="rect">＋ 矩形</button><button data-add="ellipse">＋ 椭圆</button><button data-add="diamond">＋ 菱形</button><button data-add="arrow">＋ 箭头</button>${flow?'<button data-add="triangle">＋ 三角形</button><button data-action="box" aria-pressed="false">框选</button><button data-action="connect">连接节点 / 汇入主线</button>':'<button data-action="upload">＋ 照片</button><input type="file" accept="image/png,image/jpeg,image/webp" hidden id="objectPhoto">'}<button data-action="editText">编辑文字</button><button data-action="copy">复制对象</button><button data-action="delete">删除对象</button><button data-action="undo">撤销</button><span class="object-message"></span></div><div class="object-layout"><div class="object-stage"></div><aside class="object-properties"></aside></div><div class="dialog-foot"><span>保存后写入项目；取消放弃本次画布修改。</span><button data-action="save" class="primary">${preview?'应用流程图':'保存画布'}</button></div>`;document.body.append(d);
  const q=s=>d.querySelector(s),push=()=>{history.push(clone(m));if(history.length>60)history.shift();},message=t=>q('.object-message').textContent=t;
- function drawStage(){syncConnections(m);q('.object-stage').style.cursor=tool||boxMode?'crosshair':'';q('[data-action=box]')?.setAttribute('aria-pressed',String(boxMode));d.querySelectorAll('[data-add]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.add===tool)));q('.object-stage').innerHTML=svg(m,selected,true,{picked});
+ const imageUrls=new Map();
+ function imageSource(o){
+  const source=o.rendered||o.data;
+  if(!imageUrls.has(source)){
+   const comma=source.indexOf(',');
+   try{
+    const base64=source.slice(comma+1);
+    const bytes=Uint8Array.fromBase64?Uint8Array.fromBase64(base64):Uint8Array.from(atob(base64),char=>char.charCodeAt(0));
+    const type=source.slice(5,source.indexOf(';'));
+    imageUrls.set(source,URL.createObjectURL(new Blob([bytes],{type})));
+   }catch{imageUrls.set(source,source);}
+  }
+  return imageUrls.get(source);
+ }
+ let frame=0;
+ function cancelStageFrame(){if(frame)cancelAnimationFrame(frame);frame=0;}
+ function queueStageDraw(){
+  if(frame)return;
+  frame=requestAnimationFrame(()=>{
+   frame=0;
+   if(d.isConnected)drawStage(true);
+  });
+ }
+ function dispose(){
+  cancelStageFrame();
+  for(const [source,url] of imageUrls)if(url!==source)URL.revokeObjectURL(url);
+  imageUrls.clear();
+  d.remove();
+ }
+ function drawStage(live=false){cancelStageFrame();syncConnections(m);q('.object-stage').style.cursor=tool||boxMode?'crosshair':'';q('[data-action=box]')?.setAttribute('aria-pressed',String(boxMode));d.querySelectorAll('[data-add]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.add===tool)));q('.object-stage').innerHTML=svg(m,selected,true,{picked,imageSource,live});
   if(marquee||guides){
    const box=marquee?.box;
    const selection=box?`<rect data-marquee x="${box.x}" y="${box.y}" width="${box.w}" height="${box.h}" fill="#0d9692" fill-opacity=".1" stroke="#0d9692" vector-effect="non-scaling-stroke"/>`:'';
@@ -556,9 +585,9 @@ function open(input,{title='图文画布',flow=false,photos=[],availableHeight,p
   if(marquee){
    const p=xy(ev),a=marquee.start;
    marquee.box={x:Math.min(a.x,p.x),y:Math.min(a.y,p.y),w:Math.abs(p.x-a.x),h:Math.abs(p.y-a.y)};
-   picked=nodesInBox(m,marquee.box);drawStage();return;
+   picked=nodesInBox(m,marquee.box);queueStageDraw();return;
   }
-  if(creating){const o=m.objects.find(o=>o.id===creating.id),p=xy(ev);p.x=Math.max(0,Math.min(m.width,p.x));p.y=Math.max(0,Math.min(bounds().height,p.y));creating.moved=Math.hypot(ev.clientX-creating.clientX,ev.clientY-creating.clientY)>=4;if(['arrow','line'].includes(o.type)){const r=q('svg').getBoundingClientRect();snap=ev.altKey?null:nearestAnchor(m,p,o.id,{x:r.width/m.width,y:r.height/m.height});attachEndpoint(m,o,'end',snap);setLineEndpoints(o,{x1:creating.p.x,y1:creating.p.y,x2:(snap||p).x,y2:(snap||p).y});}else Object.assign(o,{x:Math.min(p.x,creating.p.x),y:Math.min(p.y,creating.p.y),w:Math.abs(p.x-creating.p.x),h:Math.abs(p.y-creating.p.y)});drawStage();return;}if(!drag)return;const distance=Math.hypot(ev.clientX-drag.clientX,ev.clientY-drag.clientY);if(!drag.moved&&distance<4)return;drag.moved=true;lastTap=null;const p=xy(ev),o=m.objects.find(o=>o.id===drag.id),dx=p.x-drag.p.x,dy=p.y-drag.p.y;if(drag.flowHandle){
+  if(creating){const o=m.objects.find(o=>o.id===creating.id),p=xy(ev);p.x=Math.max(0,Math.min(m.width,p.x));p.y=Math.max(0,Math.min(bounds().height,p.y));creating.moved=Math.hypot(ev.clientX-creating.clientX,ev.clientY-creating.clientY)>=4;if(['arrow','line'].includes(o.type)){const r=q('svg').getBoundingClientRect();snap=ev.altKey?null:nearestAnchor(m,p,o.id,{x:r.width/m.width,y:r.height/m.height});attachEndpoint(m,o,'end',snap);setLineEndpoints(o,{x1:creating.p.x,y1:creating.p.y,x2:(snap||p).x,y2:(snap||p).y});}else Object.assign(o,{x:Math.min(p.x,creating.p.x),y:Math.min(p.y,creating.p.y),w:Math.abs(p.x-creating.p.x),h:Math.abs(p.y-creating.p.y)});queueStageDraw();return;}if(!drag)return;const distance=Math.hypot(ev.clientX-drag.clientX,ev.clientY-drag.clientY);if(!drag.moved&&distance<4)return;drag.moved=true;lastTap=null;const p=xy(ev),o=m.objects.find(o=>o.id===drag.id),dx=p.x-drag.p.x,dy=p.y-drag.p.y;if(drag.flowHandle){
   const edge=m.edges.find(e=>e.id===drag.id);
   if(drag.flowHandle==='label'){edge.labelX=drag.labelX+dx;edge.labelY=drag.labelY+dy;}
   const tolerance=ev.altKey?0:7/Math.abs(q('svg').getScreenCTM().a);
@@ -567,7 +596,7 @@ function open(input,{title='图文画布',flow=false,photos=[],availableHeight,p
    guides=tolerance?snapBend(m,edge,tolerance):null;
   }
   if(drag.flowHandle==='join')guides=snapJoin(m,edge,p,tolerance);
-  drawStage();return;
+  queueStageDraw();return;
  }if(drag.endpoint){const ends={...drag.points},key=drag.endpoint==='start'?'1':'2';const free={x:Math.max(0,Math.min(m.width,p.x)),y:Math.max(0,Math.min(bounds().height,p.y))},rect=q('svg').getBoundingClientRect();snap=ev.altKey?null:nearestAnchor(m,free,o.id,{x:rect.width/m.width,y:rect.height/m.height});ends['x'+key]=(snap||free).x;ends['y'+key]=(snap||free).y;attachEndpoint(m,o,drag.endpoint,snap);setLineEndpoints(o,ends);}else if(drag.resize){resizeCorner(o,drag,drag.resize,dx,dy,bounds());}else if(flow&&(drag.group||!['arrow','line'].includes(o.type))){
   const origins=drag.origins||[{id:o.id,x:drag.x,y:drag.y,w:drag.w,h:drag.h}];
   const scale=Math.abs(q('svg').getScreenCTM().a);
@@ -577,7 +606,7 @@ function open(input,{title='图文画布',flow=false,photos=[],availableHeight,p
    for(const [end,anchor] of Object.entries(node.attachments||{}))if(!picked.includes(anchor.targetId))delete node.attachments[end];
    node.x=origin.x+guides.dx;node.y=origin.y+guides.dy;
   }
- }else{if(['arrow','line'].includes(o.type))delete o.attachments;o.x=Math.max(0,Math.min(m.width-o.w,drag.x+dx));o.y=Math.max(0,Math.min(bounds().height-o.h,drag.y+dy));}drawStage();};q('.object-stage').onpointerup=ev=>{
+ }else{if(['arrow','line'].includes(o.type))delete o.attachments;o.x=Math.max(0,Math.min(m.width-o.w,drag.x+dx));o.y=Math.max(0,Math.min(bounds().height-o.h,drag.y+dy));}queueStageDraw();};q('.object-stage').onpointerup=ev=>{
   if(marquee){
    marquee=null;if(picked.length===1){selected=picked[0];picked=[];}
    draw();return;
@@ -602,8 +631,8 @@ function open(input,{title='图文画布',flow=false,photos=[],availableHeight,p
    message(boxMode?'按住并拖出选择框。':'已退出框选。');return;
   }
   boxMode=false;
-  if(name==='close'){d.close();d.remove();}
-  else if(name==='save'){onSave?.(normalize(m));d.close();d.remove();}
+  if(name==='close'){d.close();dispose();}
+  else if(name==='save'){onSave?.(normalize(m));d.close();dispose();}
   else if(name==='undo'&&history.length){m=history.pop();picked=[];selected='';draw();}
   else if(name==='delete'&&(picked.length||selected)){
    push();for(const key of picked.length?picked:[selected])remove(m,key);
@@ -645,7 +674,17 @@ function open(input,{title='图文画布',flow=false,photos=[],availableHeight,p
     const w=image.naturalWidth*scale,h=image.naturalHeight*scale;
     const x=pasted?(area.width-w)/2:Math.min(80,area.width-w);
     const y=pasted?(area.height-h)/2:Math.min(80,area.height-h);
-    const photo={id:id(),type:'photo',data,x,y,w,h,aspectRatio:w/h};
+    let source=data;
+    const maxDimension=Math.max(image.naturalWidth,image.naturalHeight);
+    if(pasted&&maxDimension>1800){
+     const ratio=1800/maxDimension;
+     const canvas=document.createElement('canvas');
+     canvas.width=Math.max(1,Math.round(image.naturalWidth*ratio));
+     canvas.height=Math.max(1,Math.round(image.naturalHeight*ratio));
+     canvas.getContext('2d').drawImage(image,0,0,canvas.width,canvas.height);
+     source=canvas.toDataURL(file.type,.92);
+    }
+    const photo={id:id(),type:'photo',data:source,x,y,w,h,aspectRatio:w/h};
     push();m=normalize({...m,objects:[...m.objects,photo]});
     selected=photo.id;picked=[];tool='';snap=null;boxMode=false;
     draw();message(pasted?'已粘贴图片，可拖动或缩放。':'已添加图片，可拖动或缩放。');
@@ -666,7 +705,7 @@ function open(input,{title='图文画布',flow=false,photos=[],availableHeight,p
  if(ev.key==='Escape'&&(marquee||boxMode||picked.length)){
   ev.preventDefault();if(drag?.group){m=history.pop()||m;drag=null;guides=null;}marquee=null;boxMode=false;picked=[];draw();return;
  }
- if(ev.key==='Escape'&&(tool||creating)){ev.preventDefault();if(creating){m=history.pop();creating=null;selected='';}tool='';snap=null;draw();message('已取消绘制');return;}if(/INPUT|TEXTAREA|SELECT/.test(ev.target.tagName))return;if(ev.key==='F2'){ev.preventDefault();beginInline();return;}if(ev.key==='Delete'){ev.preventDefault();action('delete');}if((ev.ctrlKey||ev.metaKey)&&ev.key.toLowerCase()==='z'){ev.preventDefault();action('undo');}if((ev.ctrlKey||ev.metaKey)&&ev.key.toLowerCase()==='d'){ev.preventDefault();action('copy');}};d.oncancel=()=>d.remove();draw();if(drawingHeight)message(contentHeight(m)>drawingHeight?'白色区域为文字之外的可用画布；灰色区域有超出元素，请手动移回或缩小。':'白色区域为文字之外的可用画布；文字和图片不自动缩放。');d.showModal();if(!flow)q('.object-stage').focus({preventScroll:true});
+ if(ev.key==='Escape'&&(tool||creating)){ev.preventDefault();if(creating){m=history.pop();creating=null;selected='';}tool='';snap=null;draw();message('已取消绘制');return;}if(/INPUT|TEXTAREA|SELECT/.test(ev.target.tagName))return;if(ev.key==='F2'){ev.preventDefault();beginInline();return;}if(ev.key==='Delete'){ev.preventDefault();action('delete');}if((ev.ctrlKey||ev.metaKey)&&ev.key.toLowerCase()==='z'){ev.preventDefault();action('undo');}if((ev.ctrlKey||ev.metaKey)&&ev.key.toLowerCase()==='d'){ev.preventDefault();action('copy');}};d.oncancel=dispose;draw();if(drawingHeight)message(contentHeight(m)>drawingHeight?'白色区域为文字之外的可用画布；灰色区域有超出元素，请手动移回或缩小。':'白色区域为文字之外的可用画布；文字和图片不自动缩放。');d.showModal();if(!flow)q('.object-stage').focus({preventScroll:true});
 }
 const api={contentHeight,attachEndpoint,syncConnections,anchorPoints,nearestAnchor,resizeCorner,lineEndpoints,setLineEndpoints,lineAngle,setLineAngle,wrapText,flowTextWidth,normalize,edgePoints,flowRoute,flowLabel,flowShapes,generateFlow,resolvedFlow,remove,duplicate,fromPhotos,restorePhotoCaptions,fromProcesses,svg,open};if(typeof module!=='undefined')module.exports=api;root.SOP_OBJECTS=api;
 })(typeof window==='undefined'?globalThis:window);
