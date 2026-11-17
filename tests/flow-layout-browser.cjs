@@ -218,6 +218,13 @@ async function main(){
    ]};
    SOP.replaceProject(p);SOP.setSelected('front:flow:0');
   });
+  const centered=await page.locator('#previewStage .flow-wrap svg').evaluate(sheet=>{
+   const content=sheet.querySelector(':scope > g');
+   const original=content.getBBox(),matrix=content.transform.baseVal.getItem(0).matrix;
+   const {width,height}=sheet.viewBox.baseVal;
+   return {dx:original.x+original.width/2+matrix.e-width/2,dy:original.y+original.height/2+matrix.f-height/2};
+  });
+  assert(Math.abs(centered.dx)<1&&Math.abs(centered.dy)<1,'flow preview should center the visible content');
   await page.locator('#editFlowGraph').click();
   const moveWithGuide=async(start,end,axis,expected,screenshot)=>{
    await page.mouse.move(...start);await page.mouse.down();await page.mouse.move(...end,{steps:7});

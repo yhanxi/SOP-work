@@ -409,13 +409,17 @@ function restorePhotoCaptions(input,photos){
 function fromProcesses(pages){const m={width:1000,height:650,objects:[],edges:[]},seen=new Set();pages.filter(p=>{if(seen.has(p.processId))return false;seen.add(p.processId);return true;}).forEach((p,i)=>{m.objects.push({id:id(),type:'rect',text:p.name,x:60+Math.floor(i/6)*240,y:30+(i%6)*95,w:200,h:60,fill:'#ffffff'});if(i)m.edges.push({id:id(),from:m.objects[i-1].id,to:m.objects[i].id,label:''});});if(m.objects.length>24)throw Error('从工序生成最多支持24个节点；请拆分为多个流程或在画布手动添加。');return normalize(m);}
 // Occupied bounds detect elements outside the remaining page area without resizing them.
 function contentHeight(model){const m=normalize(model);return m.objects.reduce((bottom,o)=>{let edge=o.y+o.h;if(o.type==='photo'&&o.caption)edge+=4+17*wrapText(o.caption,o.w,14).length;if(!['photo','arrow','line'].includes(o.type)&&o.text){const lines=wrapText(o.text,o.w,o.fontSize);edge=Math.max(edge,o.y+o.h/2+(lines.length-1)*o.fontSize*.6+o.fontSize*.7);}return Math.max(bottom,edge+(['arrow','line'].includes(o.type)?Math.max(8,o.strokeWidth*3.5):8));},0);}
-function svg(model,selection='',editing=false,{viewHeight,picked=[],imageSource=o=>o.rendered||o.data,live=false}={}){const m=normalize(model,live),height=Number.isFinite(viewHeight)?Math.max(1,viewHeight):m.height,marker='sop-object-arrow-'+(++renderId);let out=`<svg class="object-sheet" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${m.width} ${height}" role="img" aria-label="独立对象画布"><defs><marker id="${marker}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#243e46"/></marker></defs><rect width="${m.width}" height="${height}" fill="white"/>`;
- const edgeLabels=[],edgeHandles=[];
+function svg(model,selection='',editing=false,{viewHeight,picked=[],imageSource=o=>o.rendered||o.data,live=false,centerContent=false}={}){const m=normalize(model,live),height=Number.isFinite(viewHeight)?Math.max(1,viewHeight):m.height,marker='sop-object-arrow-'+(++renderId);let out=`<svg class="object-sheet" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${m.width} ${height}" role="img" aria-label="独立对象画布"><defs><marker id="${marker}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#243e46"/></marker></defs><rect width="${m.width}" height="${height}" fill="white"/>`;
+ const canvas=out;
+ out='';
+ const edgeLabels=[],edgeHandles=[],bounds=[];
+ if(centerContent)for(const o of m.objects)bounds.push({x:o.x,y:o.y},{x:o.x+o.w,y:o.y+o.h});
  for(const e of m.edges){
   const points=flowRoute(m,e);
   if(points.length<2)continue;
   const coords=points.filter((point,i)=>!i||distance(point,points[i-1])>.001).map(p=>p.x+','+p.y).join(' ');
   if(!coords.includes(' '))continue;
+  if(centerContent)bounds.push(...points);
   const active=selection===e.id||picked.includes(e.id),edgeMarker=marker+'-edge-'+String(e.id).replace(/[^a-z0-9]/gi,'');
   out+=`<defs><marker id="${edgeMarker}" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" fill="${e.color}"/></marker></defs>
   <g data-object="${esc(e.id)}"><polyline points="${coords}" fill="none" stroke="${active?'#0d9692':e.color}" stroke-width="${e.strokeWidth}" marker-end="url(#${edgeMarker})"/>
@@ -439,7 +443,13 @@ function svg(model,selection='',editing=false,{viewHeight,picked=[],imageSource=
    const lines=wrapText(o.text,flowTextWidth(o),o.fontSize),fs=o.fontSize;out+=`<text text-anchor="${o.type==='text'?'start':'middle'}" x="${o.type==='text'?4:o.w/2}" y="${o.h*(o.type==='triangle'?.72:.5)-(lines.length-1)*fs*.6}" dominant-baseline="middle" font-size="${fs}" font-family="Microsoft YaHei, sans-serif" fill="${o.color}">${lines.map((s,i)=>`<tspan x="${o.type==='text'?4:o.w/2}" dy="${i?fs*1.2:0}">${esc(s)}</tspan>`).join('')}</text>`;}
   if(editing){if(['arrow','line'].includes(o.type))out+=`<line x1="${o.flipX?o.w:0}" y1="${o.flipY?o.h:0}" x2="${o.flipX?0:o.w}" y2="${o.flipY?0:o.h}" stroke="transparent" stroke-width="${Math.max(8,o.strokeWidth)}" pointer-events="stroke"/>`;out+=`<rect width="${o.w}" height="${o.h}" fill="transparent" stroke="${o.id===selection||picked.includes(o.id)?'#0d9692':'transparent'}" stroke-dasharray="5 3" ${['arrow','line'].includes(o.type)?'pointer-events="none"':''}/>`;}
   if(editing&&o.id===selection&&['arrow','line'].includes(o.type)){const p=lineEndpoints(o);out+=`<circle data-endpoint="start" cx="${p.x1-o.x}" cy="${p.y1-o.y}" r="4" fill="white" stroke="#0d9692" stroke-width="1.5"/><circle data-endpoint="end" cx="${p.x2-o.x}" cy="${p.y2-o.y}" r="4" fill="#0d9692" stroke="white" stroke-width="1.2"/>`;}else if(editing&&o.id===selection)for(const [corner,x,y]of [["nw",0,0],["ne",o.w,0],["sw",0,o.h],["se",o.w,o.h]])out+=`<rect data-resize="${corner}" x="${x-3.5}" y="${y-3.5}" width="7" height="7" fill="#0d9692" stroke="white" stroke-width="1.2"/>`;out+='</g>';
- }return out+edgeLabels.join('')+edgeHandles.join('')+'</svg>';
+ }
+ const content=out+edgeLabels.join('')+edgeHandles.join('');
+ if(!bounds.length)return canvas+content+'</svg>';
+ const xs=bounds.map(point=>point.x),ys=bounds.map(point=>point.y);
+ const dx=(m.width-Math.min(...xs)-Math.max(...xs))/2;
+ const dy=(height-Math.min(...ys)-Math.max(...ys))/2;
+ return canvas+'<g transform="translate('+dx+' '+dy+')">'+content+'</g></svg>';
 }
 function open(input,{title='图文画布',flow=false,photos=[],availableHeight,preview=false,onSave}={}){
  const d=document.createElement('dialog');d.className='object-dialog';let m=normalize(input),selected='',history=[],drag=null,snap=null,linkFrom='',inlineEdit=null,lastTap=null,tool='',creating=null;
