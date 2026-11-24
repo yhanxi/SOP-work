@@ -1,8 +1,9 @@
-"""Create Electron's standard ASAR from the generic, allowlisted application sources.
+"""Create Electron's standard ASAR from allowlisted application sources.
 
 This build step needs Python only on the build machine, never on users' PCs.
-It does not read or distribute the reference SOP or the owner's sample project.
+Company branding is included only when SOP_LOCAL_REFERENCE is set to 1.
 """
+from os import environ
 from pathlib import Path
 import hashlib,json,struct,sys
 
@@ -16,7 +17,8 @@ files={
  'project-files.cjs':(root/'project-files.cjs').read_bytes(),
  'preload.cjs':(root/'preload.cjs').read_bytes(),
  'build/icon.ico':(root/'build/icon.ico').read_bytes(),
- 'renderer/assets.js':(root/'blank-assets.js').read_bytes()
+ 'renderer/assets.js':(root/'blank-assets.js').read_bytes(),
+ 'renderer/reference-local.js':(source/'reference-local.js').read_bytes() if environ.get('SOP_LOCAL_REFERENCE') == '1' else b'// Generic template has no local branding.\n'
 }
 for name in ['index.html','style.css','app.js','desktop-updates.js','project-storage.js','native-import.js','template-v2.js','object-workspace.js','color-picker.js','workspace-controls.css','native-shapes.js','word.js','vendor/jszip.min.js','vendor/JSZip-LICENSE.md']:
     files['renderer/'+name]=(source/name).read_bytes()
@@ -35,4 +37,4 @@ out.parent.mkdir(parents=True,exist_ok=True);out.write_bytes(archive)
 manifest={n:{'bytes':len(b),'sha256':hashlib.sha256(b).hexdigest()} for n,b in files.items()}
 (root.parent/'work').mkdir(exist_ok=True)
 (root.parent/'work'/'desktop-app-manifest.json').write_text(json.dumps(manifest,ensure_ascii=False,indent=2),encoding='utf-8')
-print('Generic ASAR created:',len(archive),'bytes;',len(files),'allowlisted files')
+print('ASAR created:',len(archive),'bytes;',len(files),'allowlisted files')

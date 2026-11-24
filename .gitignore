@@ -3,6 +3,7 @@ desktop/renderer/
 desktop/dist/
 work/
 references/
+reference-local.js
 outputs/软件安装包/
 outputs/*.html
 outputs/*.zip

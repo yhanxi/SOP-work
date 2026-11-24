@@ -65,12 +65,12 @@ function create(doc,{nextId,paragraph}){
    }
    for(const o of m.objects)p.append(nativeShape({name:'流程节点 '+o.id,x:o.x*sx,y:o.y*sy,width:o.w*sx,height:o.h*sy,geometry:({text:'rect',ellipse:'ellipse',diamond:'diamond',triangle:'triangle',arrow:'line',line:'line'})[o.type]||'rect',text:['line','arrow'].includes(o.type)?undefined:window.SOP_OBJECTS.wrapText(o.text,window.SOP_OBJECTS.flowTextWidth(o),o.fontSize).join('\n'),lineWidth:o.strokeWidth*sy,stroke:o.type==='text'?null:o.color.slice(1),fill:o.fill==='transparent'?null:o.fill.slice(1),fontSize:o.fontSize*sy,textColor:o.color.slice(1),arrow:o.type==='arrow',flipH:!!o.flipX,flipV:!!o.flipY,connector:['line','arrow'].includes(o.type)}));return centerFlow(p,width,height);
   }
-  const seen=new Set(),all=project.frontContent?.flowManual?String(project.frontContent.flowText||'').split('\n').filter(x=>x.trim()).map(name=>({name})):project.pages.filter(p=>{if(seen.has(p.processId))return false;seen.add(p.processId);return true;}),pages=all.slice(chunk*24,chunk*24+24),p=paragraph(doc,' ',2),pr=[...p.children].find(e=>e.localName==='pPr'),spacing=[...pr.children].find(e=>e.localName==='spacing');
+  const seen=new Set(),all=project.frontContent?.flowManual?String(project.frontContent.flowText||'').split('\n').filter(x=>x.trim()).map(name=>({name})):project.pages.filter(p=>{if(!p.name?.trim()||seen.has(p.processId))return false;seen.add(p.processId);return true;}),pages=all.slice(chunk*24,chunk*24+24),p=paragraph(doc,' ',2),pr=[...p.children].find(e=>e.localName==='pPr'),spacing=[...pr.children].find(e=>e.localName==='spacing');
   spacing.setAttributeNS(W,'w:line',String(Math.round(height*20)));spacing.setAttributeNS(W,'w:lineRule','exact');spacing.setAttributeNS(W,'w:after','0');
   const sx=Math.min(width/1500,height/850),sy=sx;
   pages.forEach((page,i)=>{
    const col=Math.floor(i/8),row=i%8,x=45+col*460,y=35+row*96;
-   p.append(nativeShape({name:'流程节点 '+(chunk*24+i+1),x:x*sx,y:y*sy,width:380*sx,height:58*sy,text:(chunk*24+i+1)+'. '+page.name,fill:'FFFFFF',fontSize:10.5}));
+   p.append(nativeShape({name:'流程节点 '+(chunk*24+i+1),x:x*sx,y:y*sy,width:380*sx,height:58*sy,text:window.SOP_TEMPLATE.operationLabel(page,chunk*24+i+1)+'. '+page.name,fill:'FFFFFF',fontSize:10.5}));
    if(i<pages.length-1){const points=row===7?[[x+380,y+29],[x+430,y+29],[x+430,64],[x+460,64]]:[[x+190,y+58],[x+190,y+96]];for(let j=0;j<points.length-1;j++)p.append(line('流程连线 '+(chunk*24+i+1)+'.'+(j+1),points[j][0]*sx,points[j][1]*sy,points[j+1][0]*sx,points[j+1][1]*sy,{arrow:j===points.length-2}));}
   });return centerFlow(p,width,height);
  }

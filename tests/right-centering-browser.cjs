@@ -14,5 +14,30 @@ const frame=await page.evaluate(()=>{const body=document.querySelector('#preview
  });
  assert(margins.every(delta=>delta<=.5),'Unequal page margins at viewport '+width+': '+margins);
 }
-const data=await page.evaluate(async()=>{const blob=await SOP_WORD.exportDocx(SOP.project,SOP.layout,SOP.front),bytes=await blob.arrayBuffer(),z=await JSZip.loadAsync(bytes),d=new DOMParser().parseFromString(await z.file('word/document.xml').async('string'),'application/xml'),W='http://schemas.openxmlformats.org/wordprocessingml/2006/main',rows=[...d.getElementsByTagNameNS(W,'body')[0].children].find(n=>n.localName==='tbl').getElementsByTagNameNS(W,'tr');let checked=0;for(const row of [...rows].slice(2))for(const c of [...row.children].filter(n=>n.localName==='tc').slice(1)){checked++;const pr=c.getElementsByTagNameNS(W,'tcPr')[0];if(pr.getElementsByTagNameNS(W,'vAlign')[0]?.getAttributeNS(W,'val')!=='center')throw Error('Vertical alignment');for(const p of [...c.children].filter(n=>n.localName==='p'))if(p.getElementsByTagNameNS(W,'jc')[0]?.getAttributeNS(W,'val')!=='center')throw Error('Horizontal alignment');}return {checked,bytes:Array.from(new Uint8Array(bytes))};});assert(data.checked>=30);if(process.env.SOP_CENTER_QA_OUTPUT){require('node:fs').writeFileSync(path.join(process.env.SOP_CENTER_QA_OUTPUT,'centering.docx'),Buffer.from(data.bytes));await page.locator('#previewStage').screenshot({path:path.join(process.env.SOP_CENTER_QA_OUTPUT,'preview.png')});}assert.deepEqual(errors,[]);console.log('PASS: materials visually centered on both axes; all right-hand DOCX cells centered including headers, frequency and signatures');
+const data=await page.evaluate(async()=>{
+ const blob=await SOP_WORD.exportDocx(SOP.project,SOP.layout,SOP.front),bytes=await blob.arrayBuffer();
+ const zip=await JSZip.loadAsync(bytes);
+ const doc=new DOMParser().parseFromString(await zip.file('word/document.xml').async('string'),'application/xml');
+ const W='http://schemas.openxmlformats.org/wordprocessingml/2006/main';
+ const body=doc.getElementsByTagNameNS(W,'body')[0];
+ const table=[...body.children].find(node=>node.localName==='tbl'&&node.textContent.includes('工序作业内容'));
+ const rows=[...table.children].filter(node=>node.localName==='tr');
+ const cells=row=>[...row.children].filter(node=>node.localName==='tc');
+ const centered=rows.slice(3,14).flatMap(row=>cells(row).slice(3)).concat(cells(rows[18]).slice(3),cells(rows[20]).slice(3));
+ for(const cell of centered){
+  assertAlignment(cell,'vAlign','Vertical');
+  for(const paragraph of [...cell.children].filter(node=>node.localName==='p'))assertAlignment(paragraph,'jc','Horizontal');
+ }
+ function assertAlignment(node,name,axis){
+  if(node.getElementsByTagNameNS(W,name)[0]?.getAttributeNS(W,'val')!=='center')throw Error(axis+' alignment: '+node.textContent);
+ }
+ return {checked:centered.length,bytes:Array.from(new Uint8Array(bytes))};
+});
+assert(data.checked>=30);
+if(process.env.SOP_CENTER_QA_OUTPUT){
+ require('node:fs').writeFileSync(path.join(process.env.SOP_CENTER_QA_OUTPUT,'centering.docx'),Buffer.from(data.bytes));
+ await page.locator('#previewStage').screenshot({path:path.join(process.env.SOP_CENTER_QA_OUTPUT,'preview.png')});
+}
+assert.deepEqual(errors,[]);
+console.log('PASS: materials visually centered on both axes; Word material, inspection and signature cells centered');
 }finally{if(browser)await browser.close();server.kill();}})().catch(e=>{console.error(e);process.exitCode=1;});

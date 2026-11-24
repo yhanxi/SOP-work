@@ -2,17 +2,267 @@
 (() => {
 'use strict';
 const W='http://schemas.openxmlformats.org/wordprocessingml/2006/main',R='http://schemas.openxmlformats.org/officeDocument/2006/relationships',A='http://schemas.openxmlformats.org/drawingml/2006/main';
-const parse=s=>new DOMParser().parseFromString(s,'application/xml'),serialize=n=>new XMLSerializer().serializeToString(n),kids=(n,name)=>[...n.children].filter(c=>c.localName===name),one=(n,name)=>kids(n,name)[0],val=(n,name)=>n?.getAttributeNS(W,name)||'',esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const parse=s=>new DOMParser().parseFromString(s,'application/xml'),serialize=n=>new XMLSerializer().serializeToString(n),kids=(n,name)=>[...(n?.children||[])].filter(c=>c.localName===name),one=(n,name)=>kids(n,name)[0],val=(n,name)=>n?.getAttributeNS(W,name)||'',esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const signature=p=>JSON.stringify([p.steps,p.requirements,p.photos.map(ph=>[ph.data,ph.caption,ph.marks]),...(p.textStyles?[p.textStyles]:[]),...(p.contentStyle?[p.contentStyle]:[])]);
-const active=p=>!p.canvas&&!p.stepsHighlights?.length&&!p.requirementsHighlights?.length&&!p.stepsTextColors?.length&&!p.requirementsTextColors?.length&&p.importedContent?.signature===signature(p);
+// Reuse the original Word paragraph/run structure for mapped text-only edits.
+const importedBodies=new WeakMap(), importedResources=new WeakMap();
+const richBodySupported=page=>page.importedContent&&!page.canvas&&!['steps','requirements'].some(field=>page[field+'Highlights']?.length||page[field+'TextColors']?.length);
+function bodyBlocks(page){
+ if(!richBodySupported(page))return null;
+ const key=signature(page),source=page.importedContent,projection=importedBodies.get(source);
+ if(projection?.key===key&&projection.blocks)return projection.blocks;
+ return source.signature===key?source.blocks:null;
+}
+const active=page=>!!bodyBlocks(page);
+function operationLine(line,current){
+ const heading=line.match(/^\s*(?:[一二三四五六七八九十\d]+[、.．）)]\s*)?(操作步骤|工艺技术要求|注意事项)\s*[：:]?\s*(.*)$/);
+ const field=heading?(heading[1]==='操作步骤'?'steps':'requirements'):current;
+ const text=heading?heading[2]:line;
+ return {field,text:text.trim()&&!/^[←→\s]+$/.test(text)?text:'',prefix:line.length-text.length};
+}
+function mapBodyLines(roots){
+ const fields={steps:[],requirements:[]};
+ let field='steps',text='',parts=[];
+ const next=()=>{
+  const mapped=operationLine(text,field);
+  field=mapped.field;
+  if(mapped.text)fields[field].push({...mapped,parts});
+  text='';parts=[];
+ };
+ const walk=node=>{
+  const chosen=branch(node);
+  if(chosen){walk(chosen);return;}
+  if(node.namespaceURI===W){
+   if(['drawing','pict','del'].includes(node.localName))return;
+   if(node.localName==='t'||node.localName==='tab'){
+    const value=node.localName==='tab'?'\t':node.textContent;
+    parts.push({start:text.length,end:text.length+value.length,node:node.localName==='t'?node:null});
+    text+=value;
+    return;
+   }
+   if(['br','cr'].includes(node.localName)){next();return;}
+  }
+  for(const child of node.children)walk(child);
+  if(node.namespaceURI===W&&node.localName==='p'&&text)next();
+ };
+ roots.forEach(walk);
+ if(text)next();
+ return fields;
+}
+function replaceBodyLine(line,replacement){
+ let start=0, common=0;
+ while(start<line.text.length&&start<replacement.length&&line.text[start]===replacement[start])start++;
+ while(common<line.text.length-start&&common<replacement.length-start&&line.text.at(-1-common)===replacement.at(-1-common))common++;
+ const end=line.prefix+line.text.length-common, value=replacement.slice(start,replacement.length-common);
+ start+=line.prefix;
+ const missing=start===end;
+ const touched=line.parts.filter(part=>missing?part.start<=start&&part.end>=start:part.start<end&&part.end>start);
+ if(!touched.length||touched.some(part=>!part.node)||value.includes('\t'))return false;
+ for(const [index,part]of (missing?[touched[0]]:touched).entries()){
+  const node=part.node,original=node.textContent;
+  node.textContent=original.slice(0,Math.max(0,start-part.start))+(index===0?value:'')+original.slice(Math.min(original.length,end-part.start));
+  node.setAttributeNS('http://www.w3.org/XML/1998/namespace','xml:space','preserve');
+ }
+ return true;
+}
+function updatedBodyRoots(source,key){
+ const roots=source.blocks.map(b=>parse(b.xml).documentElement);
+ if(source.signature===key)return roots;
+ let original,current;
+ try{original=JSON.parse(source.signature);current=JSON.parse(key);}catch{return null;}
+ if(JSON.stringify(original.slice(2))!==JSON.stringify(current.slice(2)))return null;
+ const mapped=mapBodyLines(roots);
+ for(const [index,field]of ['steps','requirements'].entries()){
+  if(original[index]===current[index])continue;
+  const lines=current[index]?current[index].split('\n'):[],matches=mapped[field];
+  if(matches.length!==lines.length||matches.map(item=>item.text).join('\n')!==original[index])return null;
+  for(const [i,line]of matches.entries())if(line.text!==lines[i]&&!replaceBodyLine(line,lines[i]))return null;
+ }
+ return roots;
+}
+async function importResourceBundle(source){
+ const zip=new JSZip();
+ for(const [file,data]of Object.entries(source.files))zip.file(file,data,{base64:true});
+ const documentRels=parse(await zip.file('word/_rels/document.xml.rels').async('string'));
+ const rels=new Map([...documentRels.documentElement.children].map(e=>[e.getAttribute('Id'),e.getAttribute('Target')]));
+ return {zip,rels,...await typographyParts(zip)};
+}
+async function refreshBody(project){
+ const source=project.nativeWord;
+ if(!source?.files)return false;
+ const results=await Promise.all(project.pages.filter(richBodySupported).map(async page=>{
+  const reference=page.importedContent,key=signature(page),recent=importedBodies.get(reference);
+  if(recent?.key===key){await recent.pending;return false;}
+  if(reference.signature===key&&reference.blocks.every(b=>b.typography===1))return false;
+  const projection={key};
+  importedBodies.set(reference,projection);
+  const roots=updatedBodyRoots(reference,key);
+  if(!roots)return false;
+  if(!importedResources.has(source))importedResources.set(source,importResourceBundle(source));
+  projection.pending=(async()=>{
+   const {zip,rels,styles,theme}=await importedResources.get(source);
+   const wrapper=document.implementation.createDocument(null,'sop-body').documentElement;
+   wrapper.append(...roots.map(root=>wrapper.ownerDocument.importNode(root,true)));
+   projection.blocks=await capture(wrapper,zip,rels,styles,theme);
+  })().catch(()=>{});
+  await projection.pending;
+  return importedBodies.get(reference)===projection&&!!projection.blocks;
+ }));
+ return results.some(Boolean);
+}
+
 function resolve(target){const parts=['word'];for(const s of target.replace(/^\//,'').split('/')){if(s==='..')parts.pop();else if(s!=='.'&&s)parts.push(s);}return target.startsWith('/')?target.slice(1):parts.join('/');}
 function branch(n){if(n.namespaceURI==='http://schemas.openxmlformats.org/markup-compatibility/2006'&&n.localName==='AlternateContent')return one(n,'Choice')||one(n,'Fallback');return null;}
-async function capture(op,z,rels,styles){capture.arrowId=capture.arrowId||0;
- const defaultParagraph=styles?[...styles.getElementsByTagNameNS(W,'style')].find(st=>val(st,'type')==='paragraph'&&val(st,'default')==='1'):null;
- const styleMap=new Map(styles?[...styles.getElementsByTagNameNS(W,'style')].map(s=>[val(s,'styleId'),s]):[]);
- const properties=(node,type)=>{const pr=one(node,type),ref=val(pr&&one(pr,type==='pPr'?'pStyle':'rStyle'),'val');let result={},seen=new Set();const inherit=id=>{if(!id||seen.has(id))return;seen.add(id);const st=styleMap.get(id);if(st){inherit(val(one(st,'basedOn'),'val'));result={...result,...(type==='pPr'?css(one(st,'rPr')):{}),...css(one(st,type))};}};if(type==='pPr'&&defaultParagraph)inherit(val(defaultParagraph,'styleId'));inherit(ref);return {...result,...(type==='pPr'?css(pr&&one(pr,'rPr')):{}),...css(pr)};};
- function css(pr){const s={};if(!pr)return s;for(const c of pr.children){const v=val(c,'val');if(c.localName==='b')s['font-weight']=['0','false','off'].includes(v)?'normal':'bold';if(c.localName==='i')s['font-style']=['0','false','off'].includes(v)?'normal':'italic';if(c.localName==='u'&&v!=='none')s['text-decoration']='underline';if(c.localName==='sz'&&Number(v)>0&&Number(v)<400)s['font-size']=Number(v)/2+'pt';if(c.localName==='color'&&/^[a-f\d]{6}$/i.test(v))s.color='#'+v;if(c.localName==='shd'&&/^[a-f\d]{6}$/i.test(val(c,'fill')))s['background-color']='#'+val(c,'fill');if(c.localName==='rFonts'){const font=val(c,'eastAsia')||val(c,'ascii');if(font)s['font-family']='"'+font.replace(/[^\p{L}\p{N} _-]/gu,'')+'"';}if(c.localName==='jc'&&['left','right','center','justify','both'].includes(v))s['text-align']=v==='both'?'justify':v;if(c.localName==='spacing'){const line=Number(val(c,'line'));if(line>0)s['line-height']=val(c,'lineRule')==='auto'?String(line/240*1.3):line/20+'pt';for(const [k,key] of [['before','margin-top'],['after','margin-bottom']]){const v=Number(val(c,k));if(v>=0&&v<10000)s[key]=v/20+'pt';}}}return s;}
- const attr=s=>' style="'+esc(Object.entries(s).map(([k,v])=>k+':'+v).join(';'))+'"';
+const wNodes=(node,name)=>[...(node?.getElementsByTagNameNS(W,name)||[])];
+const aNode=(node,name)=>node?.getElementsByTagNameNS(A,name)[0];
+const isSet=node=>node&&!['0','false','off'].includes(val(node,'val'));
+const defaultParagraph=styles=>wNodes(styles,'style').find(s=>val(s,'type')==='paragraph'&&['1','true','on'].includes(val(s,'default')));
+const sourceDefaults=styles=>{
+ const defaults=one(styles?.documentElement,'docDefaults');
+ return {pPr:one(one(defaults,'pPrDefault'),'pPr'),rPr:one(one(defaults,'rPrDefault'),'rPr')};
+};
+function themeValues(theme){
+ const fonts=aNode(theme,'fontScheme'),colors=aNode(theme,'clrScheme');
+ const font=(key,language)=>{
+  if(!key)return '';
+  const group=one(fonts,key.startsWith('major')?'majorFont':'minorFont');
+  const east=/eastAsia$/i.test(key),complex=/bidi$/i.test(key);
+  let value=one(group,east?'ea':complex?'cs':'latin')?.getAttribute('typeface');
+  if(!value&&east){
+   const script=/^ja/i.test(language)?'Jpan':/^ko/i.test(language)?'Hang':/(TW|HK|MO|Hant)$/i.test(language)?'Hant':'Hans';
+   value=kids(group,'font').find(item=>item.getAttribute('script')===script)?.getAttribute('typeface');
+  }
+  return value||'';
+ };
+ const color=(value,shade,tint)=>{
+  const aliases={dark1:'dk1',dark2:'dk2',light1:'lt1',light2:'lt2',text1:'dk1',text2:'dk2',background1:'lt1',background2:'lt2',hyperlink:'hlink',followedHyperlink:'folHlink'};
+  const node=one(colors,aliases[value]||value)?.firstElementChild;
+  const rgb=node?.getAttribute(node.localName==='sysClr'?'lastClr':'val');
+  if(!/^[a-f\d]{6}$/i.test(rgb||''))return '';
+  if(!/^[a-f\d]{2}$/i.test(shade)&&!/^[a-f\d]{2}$/i.test(tint))return rgb;
+  const base=rgb.match(/../g).map(channel=>parseInt(channel,16)/255), [r,g,b]=base, min=Math.min(...base),max=Math.max(...base),span=max-min;
+  let light=(max+min)/2;
+  const saturation=span?span/(1-Math.abs(2*light-1)):0;
+  const hue=span?(max===r?(g-b)/span+6:max===g?(b-r)/span+2:(r-g)/span+4)%6:0;
+  if(/^[a-f\d]{2}$/i.test(shade))light*=parseInt(shade,16)/255;
+  if(/^[a-f\d]{2}$/i.test(tint))light=1-(1-light)*parseInt(tint,16)/255;
+  const a=saturation*Math.min(light,1-light);
+  return [0,8,4].map(offset=>{
+   const k=(offset+hue*2)%12, channel=light-a*Math.max(-1,Math.min(k-3,9-k,1));
+   return Math.round(channel*255).toString(16).padStart(2,'0');
+  }).join('');
+ };
+ return {font,color};
+}
+const fontsByScript=[['ascii','asciiTheme','asciiFont'],['hAnsi','hAnsiTheme','westernFont'],['eastAsia','eastAsiaTheme','eastFont'],['cs','cstheme','complexFont']];
+const colorFrom=(node,theme,kind='color')=>{
+ const [literal,themeName,shade,tint]=kind==='fill'?['fill','themeFill','themeFillShade','themeFillTint']:['val','themeColor','themeShade','themeTint'];
+ const value=val(node,literal),resolved=theme.color(val(node,themeName),val(node,shade),val(node,tint));
+ return resolved||(/^[a-f\d]{6}$/i.test(value)?value:'');
+};
+const safeFont=font=>String(font||'').replace(/[^\p{L}\p{N} ._-]/gu,'').trim();
+const fontLanguage=pr=>val(one(pr,'lang'),'eastAsia')||val(one(pr,'lang'),'val');
+const highlights={black:'#000000',blue:'#0000ff',cyan:'#00ffff',green:'#00ff00',magenta:'#ff00ff',red:'#ff0000',yellow:'#ffff00',white:'#ffffff',darkBlue:'#000080',darkCyan:'#008080',darkGreen:'#008000',darkMagenta:'#800080',darkRed:'#800000',darkYellow:'#808000',darkGray:'#808080',lightGray:'#c0c0c0',none:'transparent'};
+const points=value=>value!==''&&Number.isFinite(Number(value))?Number(value)/20:null;
+function textProperties(pr,theme,language){
+ const s={};
+ for(const c of pr?.children||[]){
+  const v=val(c,'val'), pt=points(v);
+  if(c.localName==='b')s['font-weight']=isSet(c)?'bold':'normal';
+  if(c.localName==='i')s['font-style']=isSet(c)?'italic':'normal';
+  if(c.localName==='u')s['text-decoration']=v==='none'?'none':'underline';
+  if(c.localName==='sz'&&Number(v)>0&&Number(v)<400)s['font-size']=Number(v)/2+'pt';
+  if(c.localName==='color'){
+   const color=colorFrom(c,theme);
+   if(color)s.color='#'+color;
+   else if(v==='auto')s.color='#000000';
+  }
+  if(c.localName==='shd'){
+   const fill=colorFrom(c,theme,'fill');
+   if(fill)s['background-color']='#'+fill;
+  }
+  if(c.localName==='spacing'&&pt!==null)s['letter-spacing']=pt+'pt';
+  if(c.localName==='rFonts')for(const [literal,reference,key]of fontsByScript){
+   const font=safeFont(theme.font(val(c,reference),language)||val(c,literal));
+   if(font)s[key]=font;
+  }
+ }
+ const highlight=highlights[val(one(pr,'highlight'),'val')];
+ if(highlight)s['background-color']=highlight;
+ return s;
+}
+function paragraphProperties(pr){
+ const s={},spacing=one(pr,'spacing'),line=points(val(spacing,'line')),rule=val(spacing,'lineRule')||'auto',jc=val(one(pr,'jc'),'val');
+ if(['left','right','center','justify','both'].includes(jc))s['text-align']=jc==='both'?'justify':jc;
+ if(line>0)s['line-height']=rule==='auto'?String(line/12):rule==='atLeast'?'max(1.15em,'+line+'pt)':line+'pt';
+ for(const [property,css]of [['before','margin-top'],['after','margin-bottom']]){
+  const pt=points(val(spacing,property));
+  if(pt!==null&&pt>=0)s[css]=pt+'pt';
+ }
+ return s;
+}
+function formatting(styles,theme){
+ const values=themeValues(theme),defaults=sourceDefaults(styles),lookup=new Map(wNodes(styles,'style').map(style=>[val(style,'styleId'),style]));
+ const normal=val(defaultParagraph(styles),'styleId'),language=fontLanguage(defaults.rPr)||'zh-CN';
+ const chain=id=>{
+  const styles=[],seen=new Set();
+  while(lookup.has(id)&&!seen.has(id)){
+   seen.add(id);
+   const style=lookup.get(id);
+   styles.unshift(style);
+   id=val(one(style,'basedOn'),'val');
+  }
+  return styles;
+ };
+ const runs=pr=>textProperties(pr,values,fontLanguage(pr)||language);
+ return {
+  paragraph(node){
+   const direct=one(node,'pPr'),ref=val(one(direct,'pStyle'),'val');
+   const inherited=chain(lookup.has(ref)?ref:normal);
+   return {
+    paragraph:Object.assign({},paragraphProperties(defaults.pPr),...inherited.map(s=>paragraphProperties(one(s,'pPr'))),paragraphProperties(direct)),
+    run:Object.assign({},runs(defaults.rPr),...inherited.map(s=>runs(one(s,'rPr')))),
+    mark:runs(one(direct,'rPr')),
+   };
+  },
+  run(node,paragraph){
+   const direct=one(node,'rPr'),inherited=chain(val(one(direct,'rStyle'),'val'));
+   return Object.assign({},paragraph,...inherited.map(s=>runs(one(s,'rPr'))),runs(direct));
+  },
+ };
+}
+const eastAsian=/[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}\p{Script=Bopomofo}\u3000-\u30ff\uff01-\uff60\uffe0-\uffe6]/u;
+const cssAttributes=style=>' style="'+esc(Object.entries(style).filter(([key])=>!key.endsWith('Font')).map(([key,value])=>key+':'+value).join(';'))+'"';
+function runText(value,format){
+ const fragments=[];
+ let text='',last;
+ const emit=()=>{if(text)fragments.push(last?'<span style="font-family:&quot;'+esc(last)+'&quot;">'+esc(text)+'</span>':esc(text));};
+ for(const char of value){
+  const font=eastAsian.test(char)?format.eastFont||format.westernFont||format.asciiFont:char.codePointAt(0)<=127?format.asciiFont||format.westernFont:format.westernFont||format.asciiFont;
+  if(font!==last){emit();text='';last=font;}
+  text+=char;
+ }
+ emit();
+ return fragments.join('');
+}
+
+async function typographyParts(z){
+ const relationships=z.file('word/_rels/document.xml.rels');
+ const rels=relationships&&parse(await relationships.async('string'));
+ const part=type=>{
+  const target=[...(rels?.documentElement.children||[])].find(rel=>rel.getAttribute('Type')?.endsWith('/'+type))?.getAttribute('Target');
+  return z.file(target?resolve(target):type==='styles'?'word/styles.xml':'word/theme/theme1.xml');
+ };
+ const [styles,theme]=await Promise.all(['styles','theme'].map(async type=>{
+  const file=part(type);
+  return file?parse(await file.async('string')):null;
+ }));
+ return {styles,theme};
+}
+
+async function capture(op,z,rels,styles,theme){
+ capture.arrowId=capture.arrowId||0;
+ const formats=formatting(styles,theme);
  const V='urn:schemas-microsoft-com:vml';
  const number=(v,fallback=0)=>Number.isFinite(parseFloat(v))?parseFloat(v):fallback;
  const vstyle=n=>Object.fromEntries((n.getAttribute('style')||'').split(';').map(s=>s.split(':').map(t=>t.trim())).filter(x=>x.length===2));
@@ -46,20 +296,72 @@ async function capture(op,z,rels,styles){capture.arrowId=capture.arrowId||0;
   return `<svg xmlns="http://www.w3.org/2000/svg" class="imported-drawing" viewBox="0 0 ${w} ${h}" width="${w}pt" height="${h}pt" style="${style}"${anchored&&pv?.getAttribute('relativeFrom')==='page'?' data-sop-cell-anchor="1"':''}>${content}</svg>`;
  }
 
- async function html(n){const alt=branch(n);if(alt)return html(alt);const name=n.localName;if(n.namespaceURI===W&&['pPr','rPr','tcPr','tblPr','trPr','instrText','del'].includes(name))return '';if(n.namespaceURI===W&&name==='t')return esc(n.textContent);if(n.namespaceURI===W&&['br','cr'].includes(name))return '<br>';if(n.namespaceURI===W&&name==='tab')return '&#9;';
+ async function html(n,paragraph={},run={}){const alt=branch(n);if(alt)return html(alt,paragraph,run);const name=n.localName;if(n.namespaceURI===W&&['pPr','rPr','tcPr','tblPr','trPr','instrText','del'].includes(name))return '';if(n.namespaceURI===W&&name==='t')return runText(n.textContent,run);if(n.namespaceURI===W&&['br','cr'].includes(name))return '<br>';if(n.namespaceURI===W&&name==='tab')return '&#9;';
   if(n.namespaceURI===W&&name==='drawing')return drawing(n);
   if(n.namespaceURI===W&&name==='pict'){const nodes=[...n.children].filter(c=>c.namespaceURI===V&&['group','shape','rect','roundrect','line','oval'].includes(c.localName));return (await Promise.all(nodes.map(c=>vml(c)))).join('');}
-  if(n.namespaceURI===W&&name==='p'){const style=properties(n,'pPr'),plain=kids(n,'r').some(r=>kids(r,'t').some(t=>t.textContent.trim()));if(!plain){const max=Math.max(0,...kids(n,'r').map(r=>{const pr=one(r,'rPr');return Number(val(pr&&one(pr,'sz'),'val'))/2;}));if(max>0)style['font-size']=Math.max(max,parseFloat(style['font-size'])||0)+'pt';}return '<p class="imported-paragraph"'+attr(style)+'>'+await inner(n)+(plain?'':'&#160;')+'</p>';}
-  if(n.namespaceURI===W&&name==='r')return '<span'+attr(properties(n,'rPr'))+'>'+await inner(n)+'</span>';
+  if(n.namespaceURI===W&&name==='p'){
+   const resolved=formats.paragraph(n),style={...resolved.paragraph};
+   const plain=kids(n,'r').some(r=>kids(r,'t').some(t=>t.textContent.trim()));
+   const size=plain?resolved.run['font-size']:resolved.mark['font-size']||resolved.run['font-size'];
+   if(size)style['font-size']=size;
+   if(style['line-height']?.endsWith('pt'))style['min-height']=style['line-height'];
+   return '<p class="imported-paragraph"'+cssAttributes(style)+'>'+await inner(n,resolved.run)+(plain?'':'&#160;')+'</p>';
+  }
+  if(n.namespaceURI===W&&name==='r'){
+   const style=formats.run(n,paragraph);
+   return '<span'+cssAttributes(style)+'>'+await inner(n,paragraph,style)+'</span>';
+  }
   if(n.namespaceURI===W&&name==='tbl'){const widths=one(n,'tblGrid')?[...one(n,'tblGrid').children].map(c=>Number(val(c,'w'))):[],total=widths.reduce((a,b)=>a+b,0);return '<table class="imported-table">'+(total?'<colgroup>'+widths.map(w=>'<col style="width:'+(w/total*100)+'%">').join('')+'</colgroup>':'')+await inner(n)+'</table>';}
   if(n.namespaceURI===W&&name==='tr'){const pr=one(n,'trPr'),height=Number(val(pr&&one(pr,'trHeight'),'val'));return '<tr'+(height?' style="height:'+(height/20)+'pt"':'')+'>'+await inner(n)+'</tr>';}
   if(n.namespaceURI===W&&name==='tc'){const pr=one(n,'tcPr'),span=Number(val(pr&&one(pr,'gridSpan'),'val'));return '<td'+(span>1&&span<100?' colspan="'+span+'"':'')+'>'+await inner(n)+'</td>';}
-  return inner(n);
+  return inner(n,paragraph,run);
  }
- async function inner(n){return (await Promise.all([...n.children].map(html))).join('');}
- const blocks=[];for(const child of op.children)if(child.localName!=='tcPr')blocks.push({xml:serialize(child),html:await html(child)});return blocks;
+ async function inner(n,paragraph,run){return (await Promise.all([...n.children].map(child=>html(child,paragraph,run)))).join('');}
+ const blocks=[];for(const child of op.children)if(child.localName!=='tcPr')blocks.push({xml:serialize(child),html:await html(child),typography:1});return blocks;
 }
 async function resources(z){const files={};for(const [name,f]of Object.entries(z.files))if(!f.dir&&name!=='customXml/sop-project.xml'&&name!=='word/document.xml'&&name!=='[Content_Types].xml')files[name]=await f.async('base64');return {files,types:await z.file('[Content_Types].xml').async('string'),documentXml:await z.file('word/document.xml').async('string')};}
+function explicitTheme(root,theme,language){
+ for(const fonts of wNodes(root,'rFonts'))for(const [literal,reference]of fontsByScript){
+  const value=theme.font(val(fonts,reference),fontLanguage(fonts.parentElement)||language);
+  if(!value)continue;
+  fonts.setAttributeNS(W,'w:'+literal,value);
+  fonts.removeAttributeNS(W,reference);
+ }
+ for(const [element,surface,refs]of [['color','val',['themeColor','themeShade','themeTint']],['shd','fill',['themeFill','themeFillShade','themeFillTint']]]){
+  for(const node of wNodes(root,element)){
+   const value=theme.color(...refs.map(key=>val(node,key)));
+   if(!value)continue;
+   node.setAttributeNS(W,'w:'+surface,value);
+   for(const key of refs)node.removeAttributeNS(W,key);
+  }
+ }
+}
+function importedStyles(target,source,prefix){
+ const fallback='SopImportDefaults',defaults=sourceDefaults(source),normal=val(defaultParagraph(source),'styleId');
+ const node=(name,attrs={})=>{
+  const element=target.createElementNS(W,'w:'+name);
+  for(const [key,value]of Object.entries(attrs))element.setAttributeNS(W,'w:'+key,value);
+  return element;
+ };
+ const base=node('style',{type:'paragraph',styleId:fallback});
+ base.append(node('name',{val:'SOP Imported Defaults'}));
+ for(const part of [defaults.pPr,defaults.rPr])if(part)base.append(target.importNode(part,true));
+ target.documentElement.append(base);
+ for(const st of wNodes(source,'style')){
+  const style=target.importNode(st,true);
+  style.setAttributeNS(W,'w:styleId',prefix+val(st,'styleId'));
+  style.removeAttributeNS(W,'default');
+  for(const n of wNodes(style,'*'))if(['basedOn','next','link','pStyle','rStyle','tblStyle'].includes(n.localName))n.setAttributeNS(W,'w:val',prefix+val(n,'val'));
+  if(val(st,'type')==='paragraph'&&!one(style,'basedOn')){
+   const afterName=one(style,'aliases')||one(style,'name');
+   if(afterName)afterName.after(node('basedOn',{val:fallback}));
+   else style.prepend(node('basedOn',{val:fallback}));
+  }
+  target.documentElement.append(style);
+ }
+ return normal?prefix+normal:fallback;
+}
+
 async function exporter(source,z,rels,ct,doc){
  if(!source)return ()=>[];
  // Keep dependency paths together, so image/chart relationships within imported parts still resolve.
@@ -69,15 +371,46 @@ async function exporter(source,z,rels,ct,doc){
  for(const rel of srcRel.documentElement.children){if(/\/(styles|numbering|settings|header|footer|customXml)$/.test(rel.getAttribute('Type')))continue;const id='rIdImported'+(++count),copy=rels.importNode(rel,true);ids.set(rel.getAttribute('Id'),id);copy.setAttribute('Id',id);if(copy.getAttribute('TargetMode')!=='External')copy.setAttribute('Target','../sop-import/'+resolve(copy.getAttribute('Target')));rels.documentElement.append(copy);}
  const decode=data=>new TextDecoder().decode(Uint8Array.from(atob(data),c=>c.charCodeAt(0)));
  const stylePrefix='SopImported_';
- if(source.files['word/styles.xml']&&z.file('word/styles.xml')){const target=parse(await z.file('word/styles.xml').async('string')),styles=parse(decode(source.files['word/styles.xml']));for(const st of styles.getElementsByTagNameNS(W,'style')){st.setAttributeNS(W,'w:styleId',stylePrefix+val(st,'styleId'));st.removeAttributeNS(W,'default');for(const n of st.getElementsByTagNameNS(W,'*'))if(['basedOn','next','link','pStyle','rStyle','tblStyle'].includes(n.localName))n.setAttributeNS(W,'w:val',stylePrefix+val(n,'val'));target.documentElement.append(target.importNode(st,true));}z.file('word/styles.xml',serialize(target));}
+ const part=type=>{
+  const relation=[...srcRel.documentElement.children].find(rel=>rel.getAttribute('Type')?.endsWith('/'+type));
+  return relation?source.files[resolve(relation.getAttribute('Target'))]:null;
+ };
+ const themeFile=part('theme'),theme=themeValues(themeFile?parse(decode(themeFile)):null),stylesFile=part('styles')||source.files['word/styles.xml'];
+ let defaultStyle='',language='zh-CN';
+ if(stylesFile&&z.file('word/styles.xml')){
+  const target=parse(await z.file('word/styles.xml').async('string')),styles=parse(decode(stylesFile));
+  language=fontLanguage(sourceDefaults(styles).rPr)||language;
+  explicitTheme(styles,theme,language);
+  defaultStyle=importedStyles(target,styles,stylePrefix);
+  z.file('word/styles.xml',serialize(target));
+ }
  let numOffset=0;
- if(source.files['word/numbering.xml']){const src=parse(decode(source.files['word/numbering.xml'])),target=z.file('word/numbering.xml')?parse(await z.file('word/numbering.xml').async('string')):parse('<w:numbering xmlns:w="'+W+'"/>');numOffset=1000+Math.max(0,...[...target.getElementsByTagNameNS(W,'num')].map(n=>Number(val(n,'numId'))),...[...target.getElementsByTagNameNS(W,'abstractNum')].map(n=>Number(val(n,'abstractNumId'))));for(const n of src.getElementsByTagNameNS(W,'*')){for(const key of ['numId','abstractNumId'])if(n.hasAttributeNS(W,key))n.setAttributeNS(W,'w:'+key,Number(val(n,key))+numOffset);if(['numId','abstractNumId'].includes(n.localName)&&n.hasAttributeNS(W,'val'))n.setAttributeNS(W,'w:val',Number(val(n,'val'))+numOffset);if(['pStyle','rStyle','styleLink','numStyleLink'].includes(n.localName))n.setAttributeNS(W,'w:val',stylePrefix+val(n,'val'));}for(const child of src.documentElement.children)target.documentElement.append(target.importNode(child,true));z.file('word/numbering.xml',serialize(target));if(![...rels.documentElement.children].some(r=>r.getAttribute('Type')===R+'/numbering')){const r=rels.createElementNS(rels.documentElement.namespaceURI,'Relationship');r.setAttribute('Id','rIdImportedNumbering');r.setAttribute('Type',R+'/numbering');r.setAttribute('Target','numbering.xml');rels.documentElement.append(r);}if(![...ct.documentElement.children].some(t=>t.getAttribute('PartName')==='/word/numbering.xml')){const t=ct.createElementNS(ct.documentElement.namespaceURI,'Override');t.setAttribute('PartName','/word/numbering.xml');t.setAttribute('ContentType','application/vnd.openxmlformats-officedocument.wordprocessingml.numbering+xml');ct.documentElement.append(t);}}
- if(numOffset&&z.file('word/styles.xml')){const styles=parse(await z.file('word/styles.xml').async('string'));for(const st of styles.getElementsByTagNameNS(W,'style'))if(val(st,'styleId').startsWith(stylePrefix))for(const n of st.getElementsByTagNameNS(W,'numId'))n.setAttributeNS(W,'w:val',Number(val(n,'val'))+numOffset);z.file('word/styles.xml',serialize(styles));}
+ if(source.files['word/numbering.xml']){const src=parse(decode(source.files['word/numbering.xml'])),target=z.file('word/numbering.xml')?parse(await z.file('word/numbering.xml').async('string')):parse('<w:numbering xmlns:w="'+W+'"/>');numOffset=1000+Math.max(0,...[...target.getElementsByTagNameNS(W,'num')].map(n=>Number(val(n,'numId'))),...[...target.getElementsByTagNameNS(W,'abstractNum')].map(n=>Number(val(n,'abstractNumId'))));for(const n of src.getElementsByTagNameNS(W,'*')){for(const key of ['numId','abstractNumId'])if(n.hasAttributeNS(W,key))n.setAttributeNS(W,'w:'+key,Number(val(n,key))+numOffset);if(['numId','abstractNumId'].includes(n.localName)&&n.hasAttributeNS(W,'val')&&(n.localName!=='numId'||val(n,'val')!=='0'))n.setAttributeNS(W,'w:val',Number(val(n,'val'))+numOffset);if(['pStyle','rStyle','styleLink','numStyleLink'].includes(n.localName))n.setAttributeNS(W,'w:val',stylePrefix+val(n,'val'));}for(const child of src.documentElement.children)target.documentElement.append(target.importNode(child,true));z.file('word/numbering.xml',serialize(target));if(![...rels.documentElement.children].some(r=>r.getAttribute('Type')===R+'/numbering')){const r=rels.createElementNS(rels.documentElement.namespaceURI,'Relationship');r.setAttribute('Id','rIdImportedNumbering');r.setAttribute('Type',R+'/numbering');r.setAttribute('Target','numbering.xml');rels.documentElement.append(r);}if(![...ct.documentElement.children].some(t=>t.getAttribute('PartName')==='/word/numbering.xml')){const t=ct.createElementNS(ct.documentElement.namespaceURI,'Override');t.setAttribute('PartName','/word/numbering.xml');t.setAttribute('ContentType','application/vnd.openxmlformats-officedocument.wordprocessingml.numbering+xml');ct.documentElement.append(t);}}
+ if(numOffset&&z.file('word/styles.xml')){const styles=parse(await z.file('word/styles.xml').async('string'));for(const st of styles.getElementsByTagNameNS(W,'style'))if(val(st,'styleId').startsWith(stylePrefix))for(const n of st.getElementsByTagNameNS(W,'numId'))if(val(n,'val')!=='0')n.setAttributeNS(W,'w:val',Number(val(n,'val'))+numOffset);z.file('word/styles.xml',serialize(styles));}
  let drawingId=100000;
- return blocks=>blocks.map(block=>{const node=parse(block.xml).documentElement;for(const n of [node,...node.getElementsByTagName('*')]){for(const a of [...n.attributes])if(a.namespaceURI===R&&ids.has(a.value))n.setAttributeNS(R,a.name,ids.get(a.value));if(['pStyle','rStyle','tblStyle'].includes(n.localName)&&n.namespaceURI===W)n.setAttributeNS(W,'w:val',stylePrefix+val(n,'val'));if(n.namespaceURI===W&&n.localName==='numId'&&numOffset)n.setAttributeNS(W,'w:val',Number(val(n,'val'))+numOffset);if(n.localName==='docPr'||n.localName==='cNvPr')n.setAttribute('id',++drawingId);}return doc.importNode(node,true);});
+ return blocks=>blocks.map(block=>{
+  const node=parse(block.xml).documentElement;
+  explicitTheme(node,theme,language);
+  for(const n of [node,...node.getElementsByTagName('*')]){
+   for(const a of [...n.attributes])if(a.namespaceURI===R&&ids.has(a.value))n.setAttributeNS(R,a.name,ids.get(a.value));
+   if(defaultStyle&&['pStyle','rStyle','tblStyle'].includes(n.localName)&&n.namespaceURI===W)n.setAttributeNS(W,'w:val',stylePrefix+val(n,'val'));
+   if(n.namespaceURI===W&&n.localName==='numId'&&numOffset&&val(n,'val')!=='0')n.setAttributeNS(W,'w:val',Number(val(n,'val'))+numOffset);
+   if(n.localName==='docPr'||n.localName==='cNvPr')n.setAttribute('id',++drawingId);
+  }
+  if(defaultStyle)for(const p of [...(node.localName==='p'&&node.namespaceURI===W?[node]:[]),...wNodes(node,'p')]){
+   let pr=one(p,'pPr');
+   if(!pr){pr=node.ownerDocument.createElementNS(W,'w:pPr');p.prepend(pr);}
+   if(!one(pr,'pStyle')){
+    const style=node.ownerDocument.createElementNS(W,'w:pStyle');
+    style.setAttributeNS(W,'w:val',defaultStyle);
+    pr.prepend(style);
+   }
+  }
+  return doc.importNode(node,true);
+ });
 }
 function preview(p){
- const html=p.importedContent.blocks.map(b=>b.html).join(''),d=new DOMParser().parseFromString(html,'text/html');
+ const html=(p.photos?bodyBlocks(p)||p.importedContent.blocks:p.importedContent.blocks).map(b=>b.html).join(''),d=new DOMParser().parseFromString(html,'text/html');
  const tags=new Set(['P','SPAN','DIV','BR','TABLE','TBODY','TR','TD','COLGROUP','COL','IMG','svg','g','image','rect','ellipse','line','defs','marker','path','foreignObject']);
  for(const n of [...d.body.querySelectorAll('*')]){if(!tags.has(n.tagName)){n.remove();continue;}for(const a of [...n.attributes]){const name=a.name.toLowerCase(),value=a.value;
   if((['marker-end','marker-start'].includes(name)&&!/^url\(#importArrow\d+\)$/.test(value))||name.startsWith('on')||!['class','style','colspan','src','alt','xmlns','viewbox','width','height','x','y','x1','x2','y1','y2','cx','cy','rx','ry','href','preserveaspectratio','fill','stroke','stroke-width','id','refx','refy','markerwidth','markerheight','orient','d','marker-end','marker-start','data-sop-cell-anchor'].includes(name)||(['src','href'].includes(name)&&!/^data:image\/(png|jpeg|webp);base64,[a-z\d+/=]+$/i.test(value))||(name==='style'&&/url|expression|@|\\|position\s*:\s*(?!absolute|relative)|behavior/i.test(value)))n.removeAttribute(a.name);
@@ -92,5 +425,5 @@ const pageSignoff=(p,m)=>Object.fromEntries(['author','authorDate','reviewer','r
 const confidentialityLevels=['绝密','机密','一般'];
 function confidentialityLevel(settings){if(confidentialityLevels.includes(settings.confidentialLevel))return settings.confidentialLevel;const text=String(settings.confidential||'').replace(/\s/g,''),checked=text.match(/[☑☒✓✔√](绝密|机密|一般)/),plain=text.match(/^(?:保密等级[：:])?(绝密|机密|一般)$/);return checked?.[1]||plain?.[1]||'';}
 function confidentialityText(settings){const level=confidentialityLevel(settings);return level?'保密等级：'+confidentialityLevels.map(label=>(label===level?'☑':'☐')+label).join('  '):String(settings.confidential||'');}
-window.SOP_IMPORT={confidentialityLevel,confidentialityText,pageSignoff,projectState,signature,active,capture,resources,exporter,preview,imageIds};
+window.SOP_IMPORT={confidentialityLevel,confidentialityText,pageSignoff,projectState,signature,active,bodyBlocks,refreshBody,operationLine,capture,typographyParts,resources,exporter,preview,imageIds};
 })();
