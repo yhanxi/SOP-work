@@ -188,7 +188,6 @@
  font-size: var(--sop-operation-heading-size); line-height: var(--sop-operation-line-height);
 }
 .reference-operation .op-cell .requirement-title { margin-top: 2mm; }
-.reference-operation .op-cell .reference-empty-requirement { margin-top: var(--sop-operation-empty-gap); }
 .reference-photo-row {
  display: flex;
  justify-content: center;

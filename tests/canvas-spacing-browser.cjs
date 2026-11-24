@@ -7,7 +7,7 @@ const info=await page.evaluate(()=>({height:SOP_OBJECTS.contentHeight(SOP.projec
 await page.locator('#editPageCanvas').click();assert.equal(await page.locator('.object-dialog .object-sheet').getAttribute('viewBox'),'0 0 900 650');assert.equal(Number(await page.locator('[data-drawing-area]').getAttribute('height')),info.space.height);const photo=await page.locator('.object-dialog [data-object="photo"]').boundingBox();await page.mouse.move(photo.x+photo.width/2,photo.y+photo.height/2);await page.mouse.down();await page.mouse.move(photo.x+photo.width/2+12,photo.y+photo.height/2+8,{steps:4});await page.mouse.up();assert((await page.locator('.object-dialog [data-object="photo"]').getAttribute('transform'))!=='translate(100 30)');await page.locator('.object-dialog [data-action="close"]').click();assert.equal(await page.evaluate(()=>JSON.stringify(SOP.project.pages[0].canvas)),info.original);
 await page.locator('[data-style-key="fontSize"]').fill('28');await page.locator('[data-style-key="fontSize"]').press('Tab');await page.evaluate(()=>SOP.refresh());const smaller=await page.evaluate(()=>SOP.canvasSpace(SOP.project.pages[0]));assert(smaller.height<info.space.height);await page.locator('[data-style-key="fontSize"]').fill('18');await page.locator('[data-style-key="fontSize"]').press('Tab');await page.evaluate(()=>SOP.refresh());const geometry=await page.evaluate(()=>{const svg=document.querySelector('#previewStage .page-object-content'),requirement=[...document.querySelectorAll('#previewStage h3')].find(x=>x.textContent.includes('工艺技术要求')),a=svg.getBoundingClientRect(),b=requirement.getBoundingClientRect();return{gap:b.top-a.bottom,bottom:b.bottom,frameBottom:document.querySelector('#previewStage .op-cell').getBoundingClientRect().bottom};});assert(geometry.gap<5,'Requirements must directly follow the remaining canvas region');assert(geometry.bottom<=geometry.frameBottom);
 if(process.env.SOP_SPACING_QA_OUTPUT)await page.locator('#previewStage').screenshot({path:path.join(process.env.SOP_SPACING_QA_OUTPUT,'preview.png')});
-const data=await page.evaluate(async()=>{const blob=await SOP_WORD.exportDocx(SOP.project,SOP.layout,SOP.front),bytes=await blob.arrayBuffer(),z=await JSZip.loadAsync(bytes),doc=new DOMParser().parseFromString(await z.file('word/document.xml').async('string'),'application/xml'),W='http://schemas.openxmlformats.org/wordprocessingml/2006/main',wp='http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing',drawing=[...doc.getElementsByTagNameNS(wp,'docPr')].find(x=>x.getAttribute('name')==='画布对象 label'),anchor=drawing.parentElement,paragraph=anchor.closest('p')||anchor.parentElement.parentElement.parentElement;const holder=[...doc.getElementsByTagNameNS(W,'p')].find(p=>[...p.getElementsByTagNameNS(wp,'docPr')].some(n=>n.getAttribute('name')==='画布对象 label'));const line=holder.getElementsByTagNameNS(W,'pPr')[0].getElementsByTagNameNS(W,'spacing')[0].getAttributeNS(W,'line'),back=await SOP_WORD.importDocx(bytes);return{bytes:Array.from(new Uint8Array(bytes)),line:Number(line),extent:Number(anchor.getElementsByTagNameNS(wp,'extent')[0].getAttribute('cx')),contentWidth:SOP_TEMPLATE.dimensions.operationContentWidthTwips/20,round:back.pages[0].canvas};});assert(Math.abs(data.line-info.space.pixels*.75*20)<=1);assert(Math.abs(data.extent-150*data.contentWidth/900*12700)<=1);assert.equal(data.round.height,650);assert.equal(data.round.objects.find(o=>o.id==='label').fontSize,20);if(process.env.SOP_SPACING_QA_OUTPUT)require('node:fs').writeFileSync(path.join(process.env.SOP_SPACING_QA_OUTPUT,'spacing.docx'),Buffer.from(data.bytes));for(const canvas of [false,true])for(const requirements of ['', ' \n　 ', '验收时确认位置。']){const result=await page.evaluate(async({canvas,requirements})=>{const p=SOP.blankPage();p.steps='确认位置';p.requirements=requirements;if(canvas)p.canvas={width:900,height:520,objects:[],edges:[]};SOP.replaceProject({...SOP.clone(SOP.project),pages:[p]});const blob=await SOP_WORD.exportDocx(SOP.project,SOP.layout,SOP.front),z=await JSZip.loadAsync(await blob.arrayBuffer()),xml=await z.file('word/document.xml').async('string');return{preview:[...document.querySelectorAll('#previewStage h3')].some(x=>x.textContent.includes('二、工艺技术要求')),word:xml.includes('二、工艺技术要求'),space:canvas?SOP.canvasSpace(p).height:null};},{canvas,requirements});assert.equal(result.preview,true);assert.equal(result.word,true);}
+const data=await page.evaluate(async()=>{const blob=await SOP_WORD.exportDocx(SOP.project,SOP.layout,SOP.front),bytes=await blob.arrayBuffer(),z=await JSZip.loadAsync(bytes),doc=new DOMParser().parseFromString(await z.file('word/document.xml').async('string'),'application/xml'),W='http://schemas.openxmlformats.org/wordprocessingml/2006/main',wp='http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing',drawing=[...doc.getElementsByTagNameNS(wp,'docPr')].find(x=>x.getAttribute('name')==='画布对象 label'),anchor=drawing.parentElement,paragraph=anchor.closest('p')||anchor.parentElement.parentElement.parentElement;const holder=[...doc.getElementsByTagNameNS(W,'p')].find(p=>[...p.getElementsByTagNameNS(wp,'docPr')].some(n=>n.getAttribute('name')==='画布对象 label'));const line=holder.getElementsByTagNameNS(W,'pPr')[0].getElementsByTagNameNS(W,'spacing')[0].getAttributeNS(W,'line'),back=await SOP_WORD.importDocx(bytes);return{bytes:Array.from(new Uint8Array(bytes)),line:Number(line),extent:Number(anchor.getElementsByTagNameNS(wp,'extent')[0].getAttribute('cx')),contentWidth:SOP_TEMPLATE.dimensions.operationContentWidthTwips/20,round:back.pages[0].canvas};});assert(Math.abs(data.line-info.space.pixels*.75*20)<=1);assert(Math.abs(data.extent-150*data.contentWidth/900*12700)<=1);assert.equal(data.round.height,650);assert.equal(data.round.objects.find(o=>o.id==='label').fontSize,20);if(process.env.SOP_SPACING_QA_OUTPUT)require('node:fs').writeFileSync(path.join(process.env.SOP_SPACING_QA_OUTPUT,'spacing.docx'),Buffer.from(data.bytes));for(const canvas of [false,true])for(const requirements of ['', ' \n　 ', '验收时确认位置。']){const result=await page.evaluate(async({canvas,requirements})=>{const p=SOP.blankPage();p.steps='确认位置';p.requirements=requirements;if(canvas)p.canvas={width:900,height:520,objects:[],edges:[]};SOP.replaceProject({...SOP.clone(SOP.project),pages:[p]});const blob=await SOP_WORD.exportDocx(SOP.project,SOP.layout,SOP.front),z=await JSZip.loadAsync(await blob.arrayBuffer()),xml=await z.file('word/document.xml').async('string');return{preview:[...document.querySelectorAll('#previewStage h3')].some(x=>x.textContent.includes('二、工艺技术要求')),word:xml.includes('二、工艺技术要求'),space:canvas?SOP.canvasSpace(p).height:null};},{canvas,requirements});assert.equal(result.preview,!!requirements.trim());assert.equal(result.word,!!requirements.trim());}
 const spacingCases=await page.evaluate(async()=>{
  await document.fonts.ready;
  const make=(name,steps,requirements,options={})=>Object.assign(SOP.blankPage(),{name,steps,requirements,contentStyle:{fontSize:12.5,letterSpacing:0}},options);
@@ -46,8 +46,8 @@ const spacingCases=await page.evaluate(async()=>{
   const headings=[...box.querySelectorAll('h3')].map(el=>el.getBoundingClientRect());
   const rows=[...box.querySelectorAll('.reference-photo-row')].map(el=>Math.round((el.getBoundingClientRect().height*toPt+parseFloat(getComputedStyle(el).marginBottom)*.75)*20));
   browser.push({sections,rows,images:box.querySelectorAll('.op-image img').length,
-   headings:headings.length,headingGap:(headings[1].top-headings[0].bottom)*toPt,canvas:p.canvasHeightPt,
-   margin:(box.getBoundingClientRect().bottom-(sections.at(-1)?.bottom??headings[1].bottom))*toPt});
+   headings:headings.length,canvas:p.canvasHeightPt,
+   margin:(box.getBoundingClientRect().bottom-(sections.at(-1)?.bottom??headings.at(-1).bottom))*toPt});
  }
  const bytes=await (await SOP_WORD.exportDocx(SOP.project,SOP.layout,SOP.front)).arrayBuffer();
  const zip=await JSZip.loadAsync(bytes),doc=new DOMParser().parseFromString(await zip.file('word/document.xml').async('string'),'application/xml');
@@ -81,14 +81,53 @@ const spacingCases=await page.evaluate(async()=>{
  const styled=[...capture.querySelectorAll('span[style]')].find(span=>span.textContent==='复'&&span.style.color);
  const latin=[...capture.querySelectorAll('span[style]')].find(span=>span.textContent==='M12'&&span.style.letterSpacing);
  const edited={fontSize:styled.style.fontSize,spacing:styled.style.letterSpacing,color:styled.style.color,latinSpacing:latin.style.letterSpacing,workbenchWidth:external.pages[1].importedContent.workbenchWidth};
- return {browser,exported,roundtrip:readBack.pages.map(p=>p.requirements),roundtripStyle:readBack.pages[1].contentStyle,edited,wordSections:doc.getElementsByTagNameNS(W,'sectPr').length,issues:await SOP.validateProjectedPages()};
+ const opCell=operation=>children(children(operation,'tr')[3],'tc')[2];
+ const legacyHeading=children(opCell(tables[1]),'p').find(p=>p.textContent==='二、工艺技术要求：');
+ const legacyEmpty=opCell(tables[6]),blankStep=children(legacyEmpty,'p')[0];
+ blankStep.getElementsByTagNameNS(W,'spacing')[0].setAttributeNS(W,'w:after','6066');
+ legacyEmpty.append(legacyHeading.cloneNode(true),doc.createElementNS(W,'w:p'));
+ const legacyGallery=opCell(tables[4]),legacyAlias=legacyHeading.cloneNode(true);
+ legacyAlias.getElementsByTagNameNS(W,'t')[0].textContent='二、验收要点：';
+ const existingShape=opCell(tables[2]).getElementsByTagNameNS(wp,'docPr');
+ const mark=[...existingShape].find(e=>e.getAttribute('descr')?.startsWith('SOP标注'));
+ legacyAlias.append(mark.parentElement.parentElement.parentElement.cloneNode(true));
+ legacyGallery.append(legacyAlias,doc.createElementNS(W,'w:p'));
+ zip.file('word/document.xml',new XMLSerializer().serializeToString(doc));
+ zip.remove('customXml/sop-project.xml');
+ const legacyProject=await SOP_WORD.importDocx(await zip.generateAsync({type:'arraybuffer'}));
+ const initialXml=legacyProject.pages[4].importedContent.blocks.map(b=>b.xml).join('');
+ const examineNative=p=>{
+  const blocks=SOP_IMPORT.bodyBlocks(p),preview=SOP_IMPORT.preview(p);
+  const view=new DOMParser().parseFromString(preview,'text/html');
+  return {active:SOP_IMPORT.active(p),heading:/工艺技术要求|验收要点/.test(preview),anchors:view.querySelectorAll('svg.imported-drawing').length,
+   step:/操作步骤/.test(preview),oldGap:blocks.some(b=>b.xml.includes('w:after="6066"')),blocks:blocks.length,text:view.body.textContent};
+ };
+ await SOP_IMPORT.refreshBody(legacyProject);
+ const emptyNative=examineNative(legacyProject.pages[4]),emptyTemplate=examineNative(legacyProject.pages[6]);
+ const basis=legacyProject.pages[2],drawingsBefore=examineNative(basis).anchors;
+ basis.requirements=' \n　 ';
+ await SOP_IMPORT.refreshBody(legacyProject);
+ const cleared=examineNative(basis);
+ basis.requirements='后续重新录入。';
+ await SOP_IMPORT.refreshBody(legacyProject);
+ const restored=examineNative(basis);
+ const nativeLayout=legacyProject.pages.map((p,i)=>({...p,pageNo:i+1,total:7,sourceId:p.id,fragment:0,standardText:''}));
+ const nativeBlob=await SOP_WORD.exportDocx(legacyProject,nativeLayout,[]);
+ const nativeZip=await JSZip.loadAsync(await nativeBlob.arrayBuffer());
+ const nativeDoc=new DOMParser().parseFromString(await nativeZip.file('word/document.xml').async('string'),'application/xml');
+ const nativeTables=children(children(nativeDoc.documentElement,'body')[0],'tbl');
+ const nativeState={emptyNative,emptyTemplate,cleared,restored,drawingsBefore,savedSource:initialXml===legacyProject.pages[4].importedContent.blocks.map(b=>b.xml).join(''),
+  word:[2,4,6].map(i=>({text:opCell(nativeTables[i]).textContent,shapes:opCell(nativeTables[i]).getElementsByTagNameNS(wp,'anchor').length}))};
+ return {browser,exported,nativeState,roundtrip:readBack.pages.map(p=>p.requirements),roundtripStyle:readBack.pages[1].contentStyle,edited,wordSections:doc.getElementsByTagNameNS(W,'sectPr').length,issues:await SOP.validateProjectedPages()};
 });
 assert.deepEqual(spacingCases.issues,[]);
 assert.equal(spacingCases.wordSections,7);
 assert.equal(spacingCases.exported.length,7);
 for(const [index,expected]of spacingCases.browser.entries()){
  const actual=spacingCases.exported[index];
+ assert.equal(actual.headings.length,index<4?2:1);
  assert.equal(actual.headings.length,expected.headings);
+ assert.equal(actual.headings[0].text,'一、操作步骤：');
  assert.equal(actual.sections.length,expected.sections.length);
  for(const [i,paragraph]of actual.sections.entries()){
   const preview=expected.sections[i];
@@ -133,6 +172,40 @@ assert.equal(spacingCases.exported[2].rows[0].anchors.filter(name=>name==='作�
 assert.equal(spacingCases.roundtrip[5],' \n　 ');
 assert.deepEqual(spacingCases.roundtripStyle,{fontSize:14,letterSpacing:1.5});
 assert.deepEqual(spacingCases.edited,{fontSize:'14pt',spacing:'1.5pt',color:'rgb(53, 94, 167)',latinSpacing:'1.5pt',workbenchWidth:true});
-assert(Math.abs(spacingCases.exported[6].headings[0].after/20-spacingCases.browser[6].headingGap)<.06);
+const native=spacingCases.nativeState;
+for(const operation of [native.emptyNative,native.emptyTemplate,native.cleared]){
+ assert(operation.active&&operation.step);
+ assert.equal(operation.heading,false);
+ assert.equal(operation.oldGap,false);
+}
+assert.equal(native.emptyTemplate.blocks,1);
+assert(native.savedSource,'Imported Word blocks must remain recoverable');
+assert(native.drawingsBefore>0);
+assert.equal(native.cleared.anchors,native.drawingsBefore);
+assert.equal(native.restored.anchors,native.drawingsBefore);
+assert(native.restored.heading&&native.restored.text.includes('后续重新录入。'));
+assert(native.word[0].text.includes('后续重新录入。'));
+assert(native.word[1].shapes>=2,'The picture and the original drawing that shares the heading paragraph must survive');
+assert(!/工艺技术要求|验收要点/.test(native.word[1].text+native.word[2].text));
+assert.equal(spacingCases.exported[6].headings[0].after,113);
+assert.equal(spacingCases.exported[6].rows.length,0);
+assert(spacingCases.browser[5].canvas>spacingCases.browser[0].canvas,'Whitespace-only requirements must release the full unused canvas height');
+await page.evaluate(()=>{window.print=()=>{};});
+await page.locator('#pdfBtn').click();
+const readRequirements=selector=>page.locator(selector).evaluateAll(pages=>pages.map(p=>[...p.querySelectorAll('.op-cell h3')].some(h=>h.textContent==='二、工艺技术要求：')));
+await page.waitForFunction(()=>document.querySelectorAll('#fullPreview .reference-operation').length===7);
+const expectedRequired=[true,true,true,true,false,false,false];
+assert.deepEqual(await readRequirements('#fullPreview .reference-operation'),expectedRequired);
+await page.locator('#printBtn').click();
+await page.waitForFunction(()=>document.querySelectorAll('#printRoot .reference-operation').length===7);
+assert.deepEqual(await readRequirements('#printRoot .reference-operation'),expectedRequired);
+await page.keyboard.press('Escape');
+await page.evaluate(()=>SOP.setSelected(SOP.project.pages[4].id));
+await page.locator('#requirementsInput').fill('清空前可再次添加。');
+await page.waitForFunction(()=>document.querySelector('#previewStage [data-text-section=requirements]')?.textContent==='清空前可再次添加。');
+assert.deepEqual(await readRequirements('#previewStage .reference-operation'),[true]);
+await page.locator('#requirementsInput').fill(' \n\t　 ');
+await page.waitForFunction(()=>!document.querySelector('#previewStage [data-print-part=requirements]'));
+assert.deepEqual(await readRequirements('#previewStage .reference-operation'),[false]);
 assert.deepEqual(errors,[]);console.log('PASS: remaining page space assigned to canvas, larger font reduces canvas only, text stays inside, geometry/font preserved and Word roundtrip');
 }finally{if(browser)await browser.close();server.kill();}})().catch(e=>{console.error(e);process.exitCode=1;});

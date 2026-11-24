@@ -15,39 +15,41 @@ function bodyBlocks(page){
 }
 const active=page=>!!bodyBlocks(page);
 function operationLine(line,current){
- const heading=line.match(/^\s*(?:[一二三四五六七八九十\d]+[、.．）)]\s*)?(操作步骤|工艺技术要求|注意事项)\s*[：:]?\s*(.*)$/);
+ const heading=line.match(/^\s*(?:[一二三四五六七八九十\d]+[、.．）)]\s*)?(操作步骤|工艺技术要求|验收要点|注意事项)\s*[：:]?\s*(.*)$/);
  const field=heading?(heading[1]==='操作步骤'?'steps':'requirements'):current;
  const text=heading?heading[2]:line;
- return {field,text:text.trim()&&!/^[←→\s]+$/.test(text)?text:'',prefix:line.length-text.length};
+ return {field,heading:!!heading,text:text.trim()&&!/^[←→\s]+$/.test(text)?text:'',prefix:line.length-text.length};
 }
 function mapBodyLines(roots){
- const fields={steps:[],requirements:[]};
+ const fields={steps:[],requirements:[]},headings={steps:[],requirements:[]};
  let field='steps',text='',parts=[];
- const next=()=>{
-  const mapped=operationLine(text,field);
+ const next=(paragraph,lineBreak)=>{
+  const mapped=operationLine(text,field),line={...mapped,parts,paragraph,lineBreak};
   field=mapped.field;
-  if(mapped.text)fields[field].push({...mapped,parts});
+  if(mapped.heading)headings[field].push(line);
+  if(mapped.text)fields[field].push(line);
   text='';parts=[];
  };
- const walk=node=>{
+ const walk=(node,paragraph)=>{
   const chosen=branch(node);
-  if(chosen){walk(chosen);return;}
+  if(chosen){walk(chosen,paragraph);return;}
   if(node.namespaceURI===W){
-   if(['drawing','pict','del'].includes(node.localName))return;
+   if(['drawing','pict','object','del'].includes(node.localName))return;
+   if(node.localName==='p')paragraph=node;
    if(node.localName==='t'||node.localName==='tab'){
     const value=node.localName==='tab'?'\t':node.textContent;
-    parts.push({start:text.length,end:text.length+value.length,node:node.localName==='t'?node:null});
+    parts.push({start:text.length,end:text.length+value.length,node:node.localName==='t'?node:null,element:node});
     text+=value;
     return;
    }
-   if(['br','cr'].includes(node.localName)){next();return;}
+   if(['br','cr'].includes(node.localName)){next(paragraph,node);return;}
   }
-  for(const child of node.children)walk(child);
-  if(node.namespaceURI===W&&node.localName==='p'&&text)next();
+  for(const child of node.children)walk(child,paragraph);
+  if(node.namespaceURI===W&&node.localName==='p'&&text)next(node);
  };
- roots.forEach(walk);
- if(text)next();
- return fields;
+ roots.forEach(root=>walk(root,null));
+ if(text)next(null);
+ return {...fields,headings};
 }
 function replaceBodyLine(line,replacement){
  let start=0, common=0;
@@ -65,20 +67,64 @@ function replaceBodyLine(line,replacement){
  }
  return true;
 }
-function updatedBodyRoots(source,key){
- const roots=source.blocks.map(b=>parse(b.xml).documentElement);
- if(source.signature===key)return roots;
+const nonTextParagraphContent=new Set(['drawing','pict','object','oMath','oMathPara','fldChar','fldSimple','sym','footnoteReference','endnoteReference','commentReference','bookmarkStart','bookmarkEnd','sdt','ins','del']);
+const emptyNativeParagraph=root=>root.namespaceURI===W&&root.localName==='p'&&
+ ![...root.getElementsByTagName('*')].some(node=>nonTextParagraphContent.has(node.localName)||node.namespaceURI===W&&node.localName==='t'&&node.textContent.trim());
+function clearNativeRequirements(roots,mapped){
+ const paragraphs=new Set(),section=[...new Set([...mapped.headings.requirements,...mapped.requirements])];
+ for(const line of section){
+  paragraphs.add(line.paragraph);
+  for(const {element}of line.parts)element.remove();
+  line.lineBreak?.remove();
+ }
+ const kept=[];
+ let insertion=-1,afterRequirement=false;
+ for(const root of roots){
+  if(paragraphs.has(root)){
+   if(insertion<0)insertion=kept.length;
+   afterRequirement=true;
+  }else if(!emptyNativeParagraph(root))afterRequirement=false;
+  if(!afterRequirement||!emptyNativeParagraph(root))kept.push(root);
+ }
+ for(const {paragraph,text}of mapped.headings.steps){
+  const spacing=one(one(paragraph,'pPr'),'spacing');
+  // The previous workbench reserved 6066 twips after the steps heading on fully blank pages.
+  if(!text&&paragraphs.size&&val(spacing,'after')==='6066')spacing.setAttributeNS(W,'w:after',window.SOP_TEMPLATE.operationText.headingAfter);
+ }
+ return {roots:kept,insertion:insertion<0?kept.length:insertion};
+}
+function updatedBodyRoots(source,key,page){
+ let roots=source.blocks.map(b=>parse(b.xml).documentElement);
+ const unchanged=source.signature===key;
+ if(unchanged&&page.requirements.trim())return roots;
  let original,current;
  try{original=JSON.parse(source.signature);current=JSON.parse(key);}catch{return null;}
  if(JSON.stringify(original.slice(2))!==JSON.stringify(current.slice(2)))return null;
  const mapped=mapBodyLines(roots);
- for(const [index,field]of ['steps','requirements'].entries()){
-  if(original[index]===current[index])continue;
-  const lines=current[index]?current[index].split('\n'):[],matches=mapped[field];
-  if(matches.length!==lines.length||matches.map(item=>item.text).join('\n')!==original[index])return null;
+ if(unchanged&&!mapped.headings.requirements.length&&!mapped.requirements.length){
+  return source.blocks.every(b=>b.typography===1)?null:roots;
+ }
+ if(original[0]!==current[0]){
+  const lines=current[0]?current[0].split('\n'):[],matches=mapped.steps;
+  if(matches.length!==lines.length||matches.map(item=>item.text).join('\n')!==original[0])return null;
   for(const [i,line]of matches.entries())if(line.text!==lines[i]&&!replaceBodyLine(line,lines[i]))return null;
  }
- return roots;
+ const requirements=current[1].split('\n').filter(line=>line.trim()),matches=mapped.requirements;
+ if(requirements.length&&original[1]===current[1])return roots;
+ if(requirements.length===matches.length&&requirements.length&&matches.map(line=>line.text).join('\n')===original[1]){
+  for(const [i,line]of matches.entries())if(line.text!==requirements[i]&&!replaceBodyLine(line,requirements[i]))return null;
+  return roots;
+ }
+ const mappedText=matches.map(line=>line.text).join('\n');
+ const section=mappedText===original[1]?mapped:{requirements:[],headings:{steps:mapped.headings.steps,requirements:mapped.headings.requirements.filter(heading=>!heading.text)}};
+ const {roots:kept,insertion}=clearNativeRequirements(roots,section);
+ if(requirements.length){
+  const doc=document.implementation.createDocument(W,'w:body');
+  const sourceIds=roots.flatMap(root=>[...root.getElementsByTagNameNS(W,'fitText')].map(node=>Number(val(node,'id'))||0));
+  let fitId=Math.max(0,...sourceIds);
+  kept.splice(insertion,0,...window.SOP_WORD.operationRequirementBlocks(doc,page,()=>++fitId));
+ }
+ return kept;
 }
 async function importResourceBundle(source){
  const zip=new JSZip();
@@ -93,10 +139,10 @@ async function refreshBody(project){
  const results=await Promise.all(project.pages.filter(richBodySupported).map(async page=>{
   const reference=page.importedContent,key=signature(page),recent=importedBodies.get(reference);
   if(recent?.key===key){await recent.pending;return false;}
-  if(reference.signature===key&&reference.blocks.every(b=>b.typography===1))return false;
+  if(reference.signature===key&&page.requirements.trim()&&reference.blocks.every(b=>b.typography===1))return false;
   const projection={key};
   importedBodies.set(reference,projection);
-  const roots=updatedBodyRoots(reference,key);
+  const roots=updatedBodyRoots(reference,key,page);
   if(!roots)return false;
   if(!importedResources.has(source))importedResources.set(source,importResourceBundle(source));
   projection.pending=(async()=>{
@@ -407,7 +453,7 @@ async function exporter(source,z,rels,ct,doc){
   explicitTheme(node,theme,language);
   for(const n of [node,...node.getElementsByTagName('*')]){
    for(const a of [...n.attributes])if(a.namespaceURI===R&&ids.has(a.value))n.setAttributeNS(R,a.name,ids.get(a.value));
-   if(defaultStyle&&['pStyle','rStyle','tblStyle'].includes(n.localName)&&n.namespaceURI===W)n.setAttributeNS(W,'w:val',stylePrefix+val(n,'val'));
+   if(defaultStyle&&['pStyle','rStyle','tblStyle'].includes(n.localName)&&n.namespaceURI===W&&!(n.localName==='rStyle'&&val(n,'val')===window.SOP_TEMPLATE.operationText.fullWidthStyleId))n.setAttributeNS(W,'w:val',stylePrefix+val(n,'val'));
    if(n.namespaceURI===W&&n.localName==='numId'&&numOffset&&val(n,'val')!=='0')n.setAttributeNS(W,'w:val',Number(val(n,'val'))+numOffset);
    if(n.localName==='docPr'||n.localName==='cNvPr')n.setAttribute('id',++drawingId);
   }

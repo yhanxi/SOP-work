@@ -8,14 +8,13 @@ const materialRows = 6, checkRows = 2, changeRows = 2, historyRows = 15;
 const operationCellWidth=9608, operationWordPadding={left:121,right:117};
 const dimensions = {operationWidthTwips:operationCellWidth, operationHeightTwips:8203, operationSidePaddingTwips:108,
  operationWordPadding, operationContentWidthTwips:operationCellWidth-operationWordPadding.left-operationWordPadding.right};
-const operationText = Object.freeze({lineHeight:1.4, headingSize:12, headingAfter:113, paragraphAfter:30, emptyHeadingGap:6066,
+const operationText = Object.freeze({lineHeight:1.4, headingSize:12, headingAfter:113, paragraphAfter:30,
  fullWidthStyleId:'SopWorkbenchFullWidthTracking', fullWidthStyleName:'SOP Workbench Full Width Tracking'});
 const rootStyle=document.documentElement.style;
 rootStyle.setProperty('--sop-operation-line-height',operationText.lineHeight);
 rootStyle.setProperty('--sop-operation-heading-size',operationText.headingSize+'pt');
 rootStyle.setProperty('--sop-operation-heading-after',operationText.headingAfter/20+'pt');
 rootStyle.setProperty('--sop-operation-paragraph-after',operationText.paragraphAfter/20+'pt');
-rootStyle.setProperty('--sop-operation-empty-gap',operationText.emptyHeadingGap/20+'pt');
 const recordRows = page => page.changeRecords ?? (page.changeRecord ? [page.changeRecord] : []);
 const cols = widths => '<colgroup>'+widths.map(width => '<col style="width:'+width/widths.reduce((a,b)=>a+b,0)*100+'%">').join('')+'</colgroup>';
 const checkFields=[['feature','控制特性'],['standard','技术要求'],['self','生产自检'],['audit','品质抽检'],['importance','重要度'],['method','管理手段']];

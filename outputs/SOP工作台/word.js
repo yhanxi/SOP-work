@@ -47,6 +47,16 @@ function bodyParagraph(doc,runs,page,key,nextFitId){
  }
  return p;
 }
+function operationHeading(doc,text){
+ const {headingSize,lineHeight}=operationText,p=para(doc,text,headingSize*2);
+ exactParagraphSpacing(doc,p,Math.round(headingSize*lineHeight*20),operationText.headingAfter);
+ return p;
+}
+function operationRequirementBlocks(doc,page,nextFitId){
+ const lines=window.SOP.bodyLines(page,'requirements');
+ if(!lines.length)return [];
+ return [operationHeading(doc,'二、工艺技术要求：'),...lines.map(line=>bodyParagraph(doc,line,page,'requirements',nextFitId))];
+}
 const cleanHeaderText=text=>String(text??'').replace(/[\t\r\n]+/g,' ').trim();
 function setCell(c,s,size=19){const doc=c.ownerDocument;for(const child of [...c.children])if(child.localName!=='tcPr')c.removeChild(child);c.append(para(doc,s,size));}
 function centerExisting(c){let pr=first(c,'tcPr');if(!pr){pr=el(c.ownerDocument,'tcPr');c.prepend(pr);}for(const x of children(pr,'vAlign'))x.remove();pr.append(el(c.ownerDocument,'vAlign',{val:'center'}));for(const paragraph of children(c,'p')){let pp=first(paragraph,'pPr');if(!pp){pp=el(c.ownerDocument,'pPr');paragraph.prepend(pp);}for(const x of [...children(pp,'jc'),...children(pp,'ind'),...children(pp,'spacing')])x.remove();pp.append(el(c.ownerDocument,'jc',{val:'center'}),el(c.ownerDocument,'ind',{left:0,right:0,firstLine:0}),el(c.ownerDocument,'spacing',{before:0,after:0,line:280,lineRule:'auto'}));}}
@@ -78,66 +88,54 @@ const materialFields=['name','spec','qty'];
 const checkFields=['feature','standard','self','audit','importance','method'];
 const revisionFields=['number','mark','count','document','signature'];
 const coverSignerFields={批准:['approver','approverSignature'],质量会签:['qualitySigner','qualitySignature'],生产会签:['productionSigner','productionSignature'],审核:['reviewer','reviewerSignature'],制定:['author','authorSignature']};
-function coverSignatureTable(doc,meta){
- // Match the cover preview's 20/27/14/29 mm columns, separated by 1 mm gaps.
- const widths=[5720,...[20,1,27,1,14,1,29].map(mm=>Math.round(mm*1440/25.4))];
- const width=widths.reduce((sum,w)=>sum+w,0),table=el(doc,'tbl'),pr=el(doc,'tblPr'),grid=el(doc,'tblGrid');
- const borders=el(doc,'tblBorders'),margins=el(doc,'tblCellMar');
- for(const edge of ['top','left','bottom','right','insideH','insideV'])borders.append(el(doc,edge,{val:'nil'}));
- for(const edge of ['top','left','bottom','right'])margins.append(el(doc,edge,{w:0,type:'dxa'}));
- pr.append(el(doc,'tblW',{w:width,type:'dxa'}),el(doc,'jc',{val:'left'}),borders,el(doc,'tblLayout',{type:'fixed'}),margins);
- grid.append(...widths.map(w=>el(doc,'gridCol',{w})));
- table.append(pr,grid);
- function appendRow(height){
-  const row=el(doc,'tr'),properties=el(doc,'trPr');
-  properties.append(el(doc,'cantSplit'),el(doc,'trHeight',{val:height,hRule:'exact'}));
-  row.append(properties);
-  table.append(row);
-  return row;
+function coverSignatureParagraph(p,label,meta,native){
+ const doc=p.ownerDocument,pr=first(p,'pPr');
+ const [labelWidth,gap,nameWidth,signLabelWidth,signWidth]=[20,1,27,14,29].map(mm=>Math.round(mm*1440/25.4));
+ const left=5720,nameStart=left+labelWidth+gap,signLabelStart=nameStart+nameWidth+gap,signStart=signLabelStart+signLabelWidth+gap;
+ const spacing=first(pr,'spacing'),indent=first(pr,'ind'),tabs=el(doc,'tabs');
+ tabs.append(...[[nameStart,nameWidth],[signLabelStart,signLabelWidth],[signStart,signWidth]].map(([start,width])=>el(doc,'tab',{val:'center',pos:Math.round(start+width/2)})));
+ pr.insertBefore(tabs,spacing);
+ indent.removeAttributeNS(W,'firstLineChars');
+ indent.removeAttributeNS(W,'firstLine');
+ indent.setAttributeNS(W,'w:left',left);
+ first(pr,'jc').setAttributeNS(W,'w:val','left');
+ const labelText=label.length===2?[...label].join('　'):label;
+ const [name,signature]=coverSignerFields[label];
+ fillParagraph(p,labelText+'：');
+ for(const value of [meta[name],'签字：',meta[signature]]){
+  const field=run(doc,cleanHeaderText(value),22);
+  first(field,'t').before(el(doc,'tab'));
+  p.append(field);
  }
- function appendSpacer(height){
-  const spacer=el(doc,'tc'),properties=el(doc,'tcPr');
-  properties.append(el(doc,'tcW',{w:width,type:'dxa'}),el(doc,'gridSpan',{val:widths.length}));
-  spacer.append(properties,el(doc,'p'));
-  appendRow(height).append(spacer);
+ // Anchor each rule to its own paragraph inside the original cover cell.
+ const ruleY=26.6;
+ for(const [i,[start,width]]of [[nameStart,nameWidth],[signStart,signWidth]].entries()){
+  const rule=native.nativeShape({name:'封面'+label+(i===0?'姓名线':'签字线'),x:start/20,y:ruleY,width:width/20,height:.01,geometry:'line',stroke:'111111',lineWidth:.5,connector:true});
+  rule.firstElementChild.firstElementChild.setAttribute('behindDoc','1');
+  p.append(rule);
  }
- // Preserve the source paragraphs' pitch and text baseline.
- const rowHeight=600+156,signatureHeight=532;
- for(const [label,[name,signature]]of Object.entries(coverSignerFields)){
-  const labelText=label.length===2?[...label].join('　'):label;
-  const values=['',labelText+'：','',meta[name],'','签字：','',meta[signature]];
-  const row=appendRow(signatureHeight);
-  for(const [i,w]of widths.entries()){
-   const c=el(doc,'tc'),properties=el(doc,'tcPr'),p=para(doc,values[i],22,i>1);
-   properties.append(el(doc,'tcW',{w,type:'dxa'}));
-   if(i===3||i===7){
-    const rule=el(doc,'tcBorders');
-    rule.append(el(doc,'bottom',{val:'single',sz:4,space:0,color:'111111'}));
-    properties.append(rule);
-   }
-   properties.append(el(doc,'vAlign',{val:'bottom'}));
-   first(first(p,'pPr'),'spacing').replaceWith(el(doc,'spacing',{before:0,after:0,line:255,lineRule:'exact'}));
-   c.append(properties,p);
-   row.append(c);
-  }
-  appendSpacer(rowHeight-signatureHeight);
- }
- // Reserve the template's final blank row within the table so Word and WPS agree on its height.
- appendSpacer(rowHeight);
- return table;
 }
-function referenceCover(t,project){
+function referenceCover(t,project,native){
  const ps=desc(t,'p'),c=project.frontContent||{},m=coverValues(project);
  fillParagraph(ps[1],c.coverHeading??'三阶文件');
  fillParagraph(ps[2],project.settings.company);
  const info=[m.number,[m.product,m.title].filter(Boolean).join(' '),m.bare,m.packed,m.version,m.date];
  for(const [i,value]of info.entries())fillParagraph(ps[i+3],txt(ps[i+3]).replace('[[VALUE]]',()=>value||''));
- const signerParagraphs=ps.slice(9,14);
- signerParagraphs[0].before(coverSignatureTable(t.ownerDocument,m));
- for(const p of signerParagraphs)p.remove();
- const doc=t.ownerDocument,pr=el(doc,'pPr');
- pr.append(el(doc,'snapToGrid',{val:0}),el(doc,'spacing',{before:0,after:0,line:1,lineRule:'exact'}));
- ps[14].replaceChildren(pr);
+ for(const [i,label]of Object.keys(coverSignerFields).entries())coverSignatureParagraph(ps[i+9],label,m,native);
+}
+function coverSignerParagraph(p){
+ const parts=txt(p).split('\t'),label=parts[0].replace(/[\s：:]/g,'');
+ if(parts.length===4&&Object.hasOwn(coverSignerFields,label)&&/^签字[：:]$/.test(parts[2].trim()))return {label,name:parts[1].trim(),signature:parts[3].trim()};
+}
+function fillCoverSignerName(p,value){
+ const [start,end]=desc(p,'tab').filter(node=>node.parentElement.localName==='r');
+ const texts=desc(p,'t').filter(text=>(start.compareDocumentPosition(text)&Node.DOCUMENT_POSITION_FOLLOWING)&&(text.compareDocumentPosition(end)&Node.DOCUMENT_POSITION_FOLLOWING));
+ if(!texts.length){
+  const text=el(p.ownerDocument,'t');
+  start.after(text);
+  texts.push(text);
+ }
+ texts.forEach((text,i)=>{text.setAttribute('xml:space','preserve');text.textContent=i===0?cleanHeaderText(value):'';});
 }
 function coverSignerCells(row){
  if(row?.localName!=='tr')return;
@@ -148,6 +146,8 @@ function readCoverValues(table){
  const result={};
  for(const p of desc(table,'p')){
   if(coverSignerCells(p.parentElement?.parentElement))continue;
+  const signer=coverSignerParagraph(p);
+  if(signer){const [name,signature]=coverSignerFields[signer.label];result[name]=signer.name;result[signature]=signer.signature;continue;}
   const m=txt(p).match(/^([^：:]+)[：:](.*)$/s);if(!m)continue;
   const key=m[1].replace(/\s/g,''),value=m[2].trim();
   const field={文件编号:'number',裸机成品料号:'bare',包装成品料号:'packed',版本:'version',生效日期:'date'}[key];
@@ -242,11 +242,6 @@ async function exportDocx(project,layout,front){
   const rel=rels.createElementNS(P,'Relationship');rel.setAttribute('Id',rid);rel.setAttribute('Type',R+'/image');rel.setAttribute('Target','media/'+name);rels.documentElement.append(rel);
   const p=xml(`<w:r xmlns:w="${W}" xmlns:r="${R}" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0"><wp:extent cx="${cx}" cy="${cy}"/><wp:docPr id="${id}" name="SOP配图${pictureIndex}"/><wp:cNvGraphicFramePr><a:graphicFrameLocks noChangeAspect="1"/></wp:cNvGraphicFramePr><a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic><pic:nvPicPr><pic:cNvPr id="${id}" name="SOP配图${pictureIndex}"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="${rid}"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r>`).documentElement;
   const dp=p.getElementsByTagNameNS('http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing','docPr')[0];dp.setAttribute('descr',String(label||'作业图片'));return d.importNode(p,true);
- }
- function operationHeading(text,after=operationText.headingAfter){
-  const {headingSize,lineHeight}=operationText,p=para(d,text,headingSize*2);
-  exactParagraphSpacing(d,p,Math.round(headingSize*lineHeight*20),after);
-  return p;
  }
  function drawingParagraph(height){
   const p=para(d,'',2);
@@ -400,18 +395,14 @@ async function exportDocx(project,layout,front){
   if(imported){
    for(const child of [...op.children])if(child.localName!=='tcPr')child.remove();
    op.append(...importNodes(window.SOP_IMPORT.bodyBlocks(p)));
-  }else if(p.steps.trim()||p.requirements.trim()||p.canvas||p.photos.length||p.standardText){
+  }else{
    for(const child of [...op.children])if(child.localName!=='tcPr')child.remove();
-   op.append(operationHeading('一、操作步骤：'));
+   op.append(operationHeading(d,'一、操作步骤：'));
    for(const line of window.SOP.bodyLines(p,'steps'))op.append(bodyParagraph(d,line,p,'steps',nextFitId));
    if(p.canvas)op.append(await canvasParagraph(p.canvas,contentWidth,p.canvasHeightPt));
    else if(p.photos.length)for(const row of window.SOP.operationPhotoLayout(p.photos))op.append(await photoParagraph(row));
-   op.append(operationHeading('二、工艺技术要求：'));
-   for(const line of window.SOP.bodyLines(p,'requirements'))op.append(bodyParagraph(d,line,p,'requirements',nextFitId));
+   op.append(...operationRequirementBlocks(d,p,nextFitId));
    if(p.standardText)op.append(para(d,p.standardText,20));
-  }else{
-   for(const paragraph of children(op,'p'))paragraph.remove();
-   op.append(operationHeading('一、操作步骤：',operationText.emptyHeadingGap),operationHeading('二、工艺技术要求：'));
   }
   if(!children(op,'p').length)op.append(para(d,'',2));
   for(let i=0;i<6;i++)for(const [j,key]of materialFields.entries())fillCell(cell(t,4+i,4+j),p.materials[i]?.[key]);
@@ -433,7 +424,7 @@ async function exportDocx(project,layout,front){
  for(const [index,entry]of ordered.entries()){
   const {kind,page}=entry;
   const t=({cover,history,flow,body:base})[kind].cloneNode(true);
-  if(kind==='cover')referenceCover(t,project);
+  if(kind==='cover')referenceCover(t,project,native);
   else if(kind==='history'){
    const p=historyTitle.cloneNode(true);fillParagraph(p,project.frontContent?.historyTitle??'文件修改履历');body.append(p);
    for(let i=0;i<15;i++)for(const [j,key]of historyFields.entries()){
@@ -573,7 +564,7 @@ function originalFrontBlocks(project,kind){
  const baseline=original.metaBaseline||{},keys={number:'文件编号',bare:'裸机成品料号',packed:'包装成品料号',version:'版本',date:'生效日期',author:'制定',reviewer:'审核',approver:'批准',qualitySigner:'质量会签',productionSigner:'生产会签'},updates=[];
  for(const [key,label]of Object.entries(keys))if(project.meta[key]!==baseline[key])updates.push({label,value:project.meta[key]||''});
  if(project.meta.product!==baseline.product||project.meta.title!==baseline.title)updates.push({label:'文件名称',value:[project.meta.product,project.meta.title].filter(Boolean).join(' ')});
- return original.blocks.map(block=>{const d=xml(block.xml),table=desc(d,'tbl')[0];if(table&&children(table,'tr')[0]&&cells(children(table,'tr')[0]).length===2){const c=cell(table,0,1);centerCell(c,project.frontContent?.coverHeading??txt(c),32);}for(const p of desc(d,'p')){const text=txt(p),normal=text.replace(/\s/g,'');for(const {label,value}of updates){if(!normal.startsWith(label+':')&&!normal.startsWith(label+'：'))continue;const split=coverSignerCells(p.parentElement?.parentElement);if(split?.label===label){fillCell(split.name,value);break;}const colon=text.search(/[：:]/);if(colon<0)continue;const nodes=children(p,'r').flatMap(r=>children(r,'t')),joined=nodes.map(n=>n.textContent).join(''),start=joined.search(/[：:]/)+1,end=joined.indexOf('签字',start),segment=joined.slice(start,end<0?joined.length:end),lead=segment.match(/^\s*/)[0].length,tail=segment.match(/\s*$/)[0].length,from=start+lead,to=Math.max(from,start+segment.length-tail);let pos=0,inserted=false;for(const n of nodes){const s=n.textContent,next=pos+s.length;if((next>from&&pos<to)||(!inserted&&from===to&&pos<=from&&next>=from)){n.textContent=s.slice(0,Math.max(0,from-pos))+(inserted?'':value)+(next>to?s.slice(Math.max(0,to-pos)):'');n.setAttribute('xml:space','preserve');inserted=true;}pos=next;}break;}}return {...block,xml:serialize(d.documentElement)};});
+ return original.blocks.map(block=>{const d=xml(block.xml),table=desc(d,'tbl')[0];if(table&&children(table,'tr')[0]&&cells(children(table,'tr')[0]).length===2){const c=cell(table,0,1);centerCell(c,project.frontContent?.coverHeading??txt(c),32);}for(const p of desc(d,'p')){const text=txt(p),normal=text.replace(/\s/g,'');for(const {label,value}of updates){if(!normal.startsWith(label+':')&&!normal.startsWith(label+'：'))continue;const split=coverSignerCells(p.parentElement?.parentElement);if(split?.label===label){fillCell(split.name,value);break;}if(coverSignerParagraph(p)?.label===label){fillCoverSignerName(p,value);break;}const colon=text.search(/[：:]/);if(colon<0)continue;const nodes=children(p,'r').flatMap(r=>children(r,'t')),joined=nodes.map(n=>n.textContent).join(''),start=joined.search(/[：:]/)+1,end=joined.indexOf('签字',start),segment=joined.slice(start,end<0?joined.length:end),lead=segment.match(/^\s*/)[0].length,tail=segment.match(/\s*$/)[0].length,from=start+lead,to=Math.max(from,start+segment.length-tail);let pos=0,inserted=false;for(const n of nodes){const s=n.textContent,next=pos+s.length;if((next>from&&pos<to)||(!inserted&&from===to&&pos<=from&&next>=from)){n.textContent=s.slice(0,Math.max(0,from-pos))+(inserted?'':value)+(next>to?s.slice(Math.max(0,to-pos)):'');n.setAttribute('xml:space','preserve');inserted=true;}pos=next;}break;}}return {...block,xml:serialize(d.documentElement)};});
 }
 async function refreshOriginalCover(project,kind='cover'){const original=project.originalFront?.[kind];if(!original)return false;const key=JSON.stringify({version:3,meta:project.meta,front:project.frontContent});if(original.previewKey===key)return false;original.previewKey=key;try{const z=new JSZip();for(const [name,data]of Object.entries(project.nativeWord.files))z.file(name,data,{base64:true});const rels=new Map([...xml(await z.file('word/_rels/document.xml.rels').async('string')).documentElement.children].map(n=>[n.getAttribute('Id'),n.getAttribute('Target')])),{styles,theme}=await window.SOP_IMPORT.typographyParts(z),d=xml('<root>'+originalFrontBlocks(project,kind).map(b=>b.xml).join('')+'</root>');original.previewBlocks=await window.SOP_IMPORT.capture(d.documentElement,z,rels,styles,theme);return true;}catch(error){original.previewKey='';return false;}}
 function convertOriginalFlow(project){
@@ -589,5 +580,5 @@ function convertOriginalFlow(project){
  return {model:window.SOP_OBJECTS.normalize({width,height,objects,edges}),notice:'已提取原稿 DrawingML 节点及连线，连接关系按几何位置推断，请逐条核对；'+unsupported+'个复杂或不支持对象可能简化，原稿仍独立保留。'};
 }
 async function exportOriginal(project){if(!project.nativeWord?.documentXml)throw Error('此项目没有保留原始 Word');const z=new JSZip();for(const [name,data]of Object.entries(project.nativeWord.files))z.file(name,data,{base64:true});z.file('word/document.xml',project.nativeWord.documentXml);z.file('[Content_Types].xml',project.nativeWord.types);return z.generateAsync({type:'blob',compression:'DEFLATE',mimeType:'application/vnd.openxmlformats-officedocument.wordprocessingml.document'});}
-window.SOP_WORD={flowNoteText,originalFrontBlocks,refreshOriginalCover,convertOriginalFlow,ensureOriginalFront,exportOriginal,exportDocx,importDocx,legacyMissingCount,recoverMissing};
+window.SOP_WORD={flowNoteText,originalFrontBlocks,refreshOriginalCover,convertOriginalFlow,ensureOriginalFront,exportOriginal,exportDocx,operationRequirementBlocks,importDocx,legacyMissingCount,recoverMissing};
 })();

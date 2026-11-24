@@ -154,7 +154,7 @@ function projectForStorage(source){
  })};
 }
 function canvasText(p,key){
- if(A.layout!=='wide-v2'&&key==='requirements'&&!p[key].trim())return '';
+ if(key==='requirements'&&!p.requirements.trim())return '';
  const heading=key==='steps'?'一、操作步骤：':'二、工艺技术要求：';
  const text=p[key].trim()?bodyLines(p,key).map(runs=>styledParagraph(p,key,runs)).join(''):'';
  const label=key==='steps'?'操作步骤':'工艺技术要求';
@@ -224,7 +224,6 @@ function opHtml(p){
   return '<div class="manual-op-layout">'+canvasText(p,'steps')+'<div class="page-object-content" data-print-area="canvas" style="height:'+space.pixels+'px;overflow:hidden">'+(space.height>0?window.SOP_OBJECTS.svg(p.canvas,'',false,{viewHeight:space.height}):'')+'</div>'+canvasText(p,'requirements')+'</div>';
  }
  if(window.SOP_IMPORT?.active(p))return '<div data-print-part="imported" data-print-label="导入原稿">'+window.SOP_IMPORT.preview(p)+'</div>';
- if(A.layout==='wide-v2'&&!p.steps.trim()&&!p.photos.length&&!p.requirements.trim())return '<h3>一、操作步骤：</h3><h3 class="reference-empty-requirement">二、工艺技术要求：</h3>';
  const steps=A.layout==='wide-v2'||p.steps.trim()||p.photos.length?canvasText(p,'steps'):'';
  return steps+operationPhotos(p.photos)+canvasText(p,'requirements')+(p.standardText?'<p>'+esc(p.standardText)+'</p>':'');
 }
