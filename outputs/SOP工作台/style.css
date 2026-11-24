@@ -179,16 +179,22 @@
 }
 .reference-station-foot span { border-bottom: var(--rule); align-content: center; }
 .reference-operation .wide-body .op-cell { padding: 0 calc(108 * var(--twip)); }
-.reference-operation .op-cell p,.reference-measure p { margin: 0 0 .53mm; line-height: 1.4; }
-.reference-operation .op-cell h3,.reference-measure h3 { margin: 0 0 1.99mm; line-height: 1.4; }
+.reference-operation .op-cell p,.reference-measure p {
+ margin: 0 0 var(--sop-operation-paragraph-after); line-height: var(--sop-operation-line-height);
+}
+.reference-operation .op-text-section p,.reference-measure .op-text-section p { text-autospace: no-autospace; }
+.reference-operation .op-cell h3,.reference-measure h3 {
+ margin: 0 0 var(--sop-operation-heading-after);
+ font-size: var(--sop-operation-heading-size); line-height: var(--sop-operation-line-height);
+}
 .reference-operation .op-cell .requirement-title { margin-top: 2mm; }
-.reference-operation .op-cell .reference-empty-requirement { margin-top: 107mm; }
+.reference-operation .op-cell .reference-empty-requirement { margin-top: var(--sop-operation-empty-gap); }
 .reference-photo-row {
  display: flex;
  justify-content: center;
  align-items: end;
  gap: 15.75pt;
- margin-block: 0 .53mm;
+ margin-block: 0 var(--sop-operation-paragraph-after);
 }
 .reference-photo-row .op-image { min-width: 0; }
 .reference-photo-row .op-image img { height: var(--photo-height); }

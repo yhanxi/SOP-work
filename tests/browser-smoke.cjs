@@ -11,6 +11,32 @@ const root=path.resolve(__dirname,'..');
   const page=await browser.newPage({acceptDownloads:true}),errors=[];page.on('pageerror',error=>errors.push(error.message));
   await page.goto(url);await page.waitForFunction(()=>window.SOP?.layout.length===1);
   assert(await page.evaluate(()=>SOP.project.settings.company===(window.SOP_REFERENCE?.defaults?.company??SOP_ASSETS.seed.settings.company)));
+
+  const cover=await page.evaluate(async()=>{
+   const p=SOP.clone(SOP.project);
+   Object.assign(p.meta,{approver:'批准甲乙',qualitySigner:'',reviewer:'审核甲',productionSignature:'已签字',author:'',authorSignature:'签名乙'});
+   const blob=await SOP_WORD.exportDocx(p,SOP.layout,SOP.front);
+   const zip=await JSZip.loadAsync(await blob.arrayBuffer()),w='http://schemas.openxmlformats.org/wordprocessingml/2006/main';
+   const xml=new DOMParser().parseFromString(await zip.file('word/document.xml').async('string'),'application/xml');
+   const find=(node,local)=>node.getElementsByTagNameNS(w,local)[0];
+   const attr=(node,key)=>node?.getAttributeNS(w,key);
+   const signatureTable=Array.from(find(xml,'tbl').getElementsByTagNameNS(w,'tbl'))[0];
+   const rows=Array.from(signatureTable.getElementsByTagNameNS(w,'tr')).filter(row=>row.getElementsByTagNameNS(w,'tc').length===8);
+   const fields=rows.map(row=>[3,7].map(index=>{
+    const c=row.getElementsByTagNameNS(w,'tc')[index];
+    return {text:c.textContent,width:attr(find(c,'tcW'),'w'),alignment:attr(find(c,'jc'),'val'),border:attr(find(c,'bottom'),'val')};
+   }));
+   zip.remove('customXml/sop-project.xml');
+   const imported=await SOP_WORD.importDocx(await zip.generateAsync({type:'arraybuffer'}));
+   const savedFields=[imported.meta.approver,imported.meta.qualitySigner,imported.meta.productionSignature,imported.meta.reviewer,imported.meta.authorSignature];
+   imported.meta.qualitySigner='会签补录';
+   const original=SOP_WORD.originalFrontBlocks(imported,'cover').map(block=>block.xml).join('');
+   return {fields,imported:savedFields,originalUpdated:original.includes('会签补录')};
+  });
+  const coverField=(text,width)=>({text,width,alignment:'center',border:'single'});
+  assert.deepEqual(cover.fields,[['批准甲乙',''],['',''],['','已签字'],['审核甲',''],['','签名乙']].map(([name,signature])=>[coverField(name,'1531'),coverField(signature,'1644')]));
+  assert.deepEqual(cover.imported,['批准甲乙','','已签字','审核甲','签名乙']);
+  assert(cover.originalUpdated);
   await page.locator('#settingsBtn').click();await page.locator('[data-setting="company"]').fill('示例制造有限公司');await page.locator('#logoFile').setInputFiles(path.join(root,'desktop/build/icon.png'));await page.waitForFunction(()=>document.querySelector('#settingsLogo').src.startsWith('data:image/png'));await page.locator('#dialogApply').click();
   const result=await page.evaluate(async()=>{
    const project=SOP.clone(SOP.project);project.settings.confidential=String.fromCharCode(9)+'保密等级：'+String.fromCharCode(10)+'一般';project.pages[0].name='准备';project.pages[0].steps='1、准备工具。';project.pages.push({...SOP.blankPage(),name:'检查',steps:'1、检查工件。'});project.pages.push({...SOP.blankPage(),name:'包装',steps:'1、包装入库。'});SOP.replaceProject(project);SOP.moveRenderedPage(0,2);

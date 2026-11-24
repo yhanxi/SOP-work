@@ -52,9 +52,61 @@ await page.evaluate(()=>{window.result=SOP.project.pages[0].canvas;});
 const result=await page.evaluate(async()=>{const blob=await SOP_WORD.exportDocx(SOP.project,SOP.layout,SOP.front),z=await JSZip.loadAsync(await blob.arrayBuffer()),xml=await z.file('word/document.xml').async('string'),back=await SOP_WORD.importDocx(await blob.arrayBuffer());const doc=new DOMParser().parseFromString(xml,'application/xml'),anchor=[...doc.getElementsByTagNameNS('*','anchor')].find(a=>[...a.getElementsByTagNameNS('*','docPr')].some(n=>n.getAttribute('name')==='画布对象 '+window.result.objects[0].id)),extent=anchor.getElementsByTagNameNS('*','extent')[0],line=anchor.getElementsByTagNameNS('*','ln')[0];return{model:window.result,back:back.pages[0].canvas,xml,stroke:Number(line.getAttribute('w')),expectedStroke:Number(extent.getAttribute('cx'))/window.result.objects[0].w*window.result.objects[0].strokeWidth};});assert.equal(result.model.objects[0].color,'#ff0000');assert.equal(result.model.objects[0].fill,'#ffff00');assert.equal(result.model.objects[3].flipX,true);assert.equal(result.model.objects[3].flipY,true);assert.deepEqual(result.model,result.back);const edited=result.model.objects.find(o=>o.type==='photo');
 assert.equal(edited.caption,'截图说明验证');assert.equal(edited.marks.length,1);
 assert(result.xml.includes('SOP标注 1 箭头'));assert(result.xml.includes('截图说明验证'));
-assert(result.xml.includes('<pic:pic'),'Pasted image must export as a native Word picture');assert(Math.abs(result.stroke-result.expectedStroke)<=1,'Word stroke must match preview scale');const [chooser]=await Promise.all([page.waitForEvent('filechooser'),card.getByRole('button',{name:'更换',exact:true}).click()]);
-await chooser.setFiles({name:'replacement.jpg',mimeType:'image/jpeg',buffer:Buffer.from(edited.data.split(',')[1],'base64')});
-await page.waitForFunction(id=>SOP.project.pages[0].canvas.objects.find(o=>o.id===id)?.marks.length===0,edited.id);
+assert(result.xml.includes('<pic:pic'),'Pasted image must export as a native Word picture');assert(Math.abs(result.stroke-result.expectedStroke)<=1,'Word stroke must match preview scale');
+const media=await page.evaluate(async id=>{
+ const project=SOP.clone(SOP.project),model=project.pages[0].canvas,photo=model.objects.find(object=>object.id===id);
+ model.objects[0].text='定位确认';
+ photo.marks.push({type:'text',text:'标注 Q3',x:.3,y:.4,fontSize:.05,color:'#7b1730',background:'#ffef61'});
+ const copyId=SOP_OBJECTS.duplicate(model,id),copy=model.objects.find(object=>object.id===copyId);
+ copy.rendered=copy.data;
+ const layout=SOP.layout.map(operation=>({...operation,canvas:model}));
+ const blob=await SOP_WORD.exportDocx(project,layout,SOP.front),bytes=await blob.arrayBuffer();
+ const zip=await JSZip.loadAsync(bytes);
+ const parse=text=>new DOMParser().parseFromString(text,'application/xml');
+ const document=parse(await zip.file('word/document.xml').async('string'));
+ const rels=parse(await zip.file('word/_rels/document.xml.rels').async('string'));
+ const find=(element,key)=>element.getElementsByTagNameNS('*',key)[0];
+ const allAnchors=[...document.getElementsByTagNameNS('*','anchor')];
+ const anchors=allAnchors.filter(anchor=>find(anchor,'docPr')?.getAttribute('descr')==='画布独立照片');
+ const textStyle=text=>{
+  const anchor=allAnchors.find(node=>find(node,'txbxContent')?.textContent===text);
+  const fonts=find(anchor,'rFonts');
+  return {
+   fonts:['ascii','hAnsi','eastAsia'].map(slot=>fonts.getAttributeNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main',slot)),
+   bold:!!find(anchor,'b'),wrap:find(anchor,'bodyPr').getAttribute('wrap'),
+  };
+ };
+ const relationships=anchors.map(anchor=>find(anchor,'blip').getAttributeNS('http://schemas.openxmlformats.org/officeDocument/2006/relationships','embed'));
+ const documentRelationships=[...rels.documentElement.children];
+ const targets=relationships.map(id=>documentRelationships.find(relation=>relation.getAttribute('Id')===id).getAttribute('Target'));
+ const restored=(await SOP_WORD.importDocx(bytes)).pages[0].canvas.objects.find(object=>object.id===copy.id);
+ return {
+  relationships,targets,drawingIds:anchors.map(anchor=>find(anchor,'docPr').getAttribute('id')),
+  offsets:anchors.map(anchor=>[...anchor.getElementsByTagNameNS('*','posOffset')].map(node=>Number(node.textContent))),
+  expected:[photo,copy].map(object=>[object.x,object.y].map(coordinate=>Math.round(coordinate*(SOP_TEMPLATE.dimensions.operationContentWidthTwips/20)/model.width*12700))),
+  identicalImage:await zip.file('word/'+targets[0]).async('base64')===photo.data.split(',')[1],
+  restoredPicture:restored.data===copy.data,removedRedundantPreview:restored.rendered===undefined,
+  objectText:textStyle('定位确认'),photoText:textStyle('标注 Q3'),
+ };
+},edited.id);
+assert.equal(media.relationships.length,2);
+assert.equal(new Set(media.relationships).size,2,'Pictures must retain independent Word relationships');
+assert.equal(new Set(media.targets).size,1,'Word must store identical image bytes once');
+assert.equal(new Set(media.drawingIds).size,2,'Pictures must retain independent drawing IDs');
+assert.deepEqual(media.offsets,media.expected);
+assert(media.identicalImage&&media.restoredPicture&&media.removedRedundantPreview);
+assert.deepEqual(media.objectText,{fonts:Array(3).fill('Microsoft YaHei'),bold:false,wrap:'square'});
+assert.deepEqual(media.photoText,{fonts:Array(3).fill('Microsoft YaHei'),bold:true,wrap:'none'});
+const [chooser]=await Promise.all([page.waitForEvent('filechooser'),card.getByRole('button',{name:'更换',exact:true}).click()]);
+const replacement=await page.evaluate(()=>{
+ const canvas=document.createElement('canvas');
+ canvas.width=26;canvas.height=16;
+ const context=canvas.getContext('2d');context.fillStyle='#238390';context.fillRect(0,0,26,16);
+ return canvas.toDataURL();
+});
+await chooser.setFiles({name:'replacement.png',mimeType:'image/png',buffer:Buffer.from(replacement.split(',')[1],'base64')});
+await page.waitForFunction(({id,data})=>SOP.project.pages[0].canvas.objects.find(o=>o.id===id)?.data===data,{id:edited.id,data:replacement});
+assert.deepEqual(await page.evaluate(id=>SOP.project.pages[0].canvas.objects.find(o=>o.id===id).marks,edited.id),edited.marks);
 assert.equal(await card.getByRole('textbox',{name:'图片说明'}).inputValue(),'截图说明验证');
 await card.getByRole('button',{name:'删除图片'}).click();
 assert.equal(await card.count(),0);

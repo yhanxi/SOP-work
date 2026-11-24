@@ -3,11 +3,12 @@
 'use strict';
 const W='http://schemas.openxmlformats.org/wordprocessingml/2006/main',WP='http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing',A='http://schemas.openxmlformats.org/drawingml/2006/main',S='http://schemas.microsoft.com/office/word/2010/wordprocessingShape';
 const emu=v=>Math.round(v*12700);
+const canvasFont='Microsoft YaHei';
 const hex=v=>/^#[0-9a-f]{6}$/i.test(v||'')?v.slice(1).toUpperCase():'E22D32';
 function create(doc,{nextId,paragraph}){
  const node=(ns,prefix,name,attrs={})=>{const e=doc.createElementNS(ns,prefix+':'+name);for(const [k,v] of Object.entries(attrs))e.setAttribute(k,String(v));return e;};
  const w=(name,attrs)=>node(W,'w',name,attrs),a=(name,attrs)=>node(A,'a',name,attrs),wp=(name,attrs)=>node(WP,'wp',name,attrs),s=(name,attrs)=>node(S,'wps',name,attrs);
- function nativeShape({name,x=0,y=0,width=1,height=1,geometry='rect',text,stroke='333333',fill=null,lineWidth=.8,arrow=false,flipH=false,flipV=false,fontSize=10.5,textColor='111111',align='center',connector=false}){
+ function nativeShape({name,x=0,y=0,width=1,height=1,geometry='rect',text,stroke='333333',fill=null,lineWidth=.8,arrow=false,flipH=false,flipV=false,fontSize=10.5,textColor='111111',align='center',connector=false,textLayout=null,arrowSize='med'}){
   const id=nextId(),r=w('r'),drawing=w('drawing'),anchor=wp('anchor',{distT:0,distB:0,distL:0,distR:0,simplePos:0,relativeHeight:id,behindDoc:0,locked:0,layoutInCell:1,allowOverlap:1});
   anchor.append(wp('simplePos',{x:0,y:0}));
   for(const [dir,relative,value]of [['H','column',x],['V','paragraph',y]]){const position=wp('position'+dir,{relativeFrom:relative}),offset=wp('posOffset');offset.textContent=String(emu(value));position.append(offset);anchor.append(position);}
@@ -17,14 +18,49 @@ function create(doc,{nextId,paragraph}){
   const geom=a('prstGeom',{prst:geometry});geom.append(a('avLst'));properties.append(transform,geom);
   if(fill){const f=a('solidFill');f.append(a('srgbClr',{val:fill}));properties.append(f);}else properties.append(a('noFill'));
   const line=a('ln',{w:emu(lineWidth),cap:'flat'});if(stroke){const color=a('solidFill');color.append(a('srgbClr',{val:stroke}));line.append(color);}else line.append(a('noFill'));
-  line.append(a('prstDash',{val:'solid'}),a('headEnd',{type:'none',w:'med',len:'med'}),a('tailEnd',{type:arrow?'triangle':'none',w:'med',len:'med'}));properties.append(line);shape.append(properties);
-  if(text!==undefined){const box=s('txbx'),content=w('txbxContent'),p=paragraph(doc,String(text),Math.round(fontSize*2),align==='center'),pr=[...p.children].find(e=>e.localName==='pPr');for(const spacing of [...pr.children].filter(e=>e.localName==='spacing'))spacing.setAttributeNS(W,'w:after','0');
-   for(const rp of p.getElementsByTagNameNS(W,'rPr')){const color=w('color');color.setAttributeNS(W,'w:val',textColor);rp.append(color);}
+  line.append(a('prstDash',{val:'solid'}),a('headEnd',{type:'none',w:'med',len:'med'}),a('tailEnd',{type:arrow?'triangle':'none',w:arrowSize,len:arrowSize}));properties.append(line);shape.append(properties);
+  if(text!==undefined){
+   const box=s('txbx'),content=w('txbxContent'),p=paragraph(doc,String(text),Math.round(fontSize*2),align==='center');
+   for(const spacing of p.getElementsByTagNameNS(W,'spacing')){
+    spacing.setAttributeNS(W,'w:after','0');
+    if(textLayout?.lineHeight!=null){
+     spacing.setAttributeNS(W,'w:line',String(Math.max(1,Math.round(textLayout.lineHeight*20))));
+     spacing.setAttributeNS(W,'w:lineRule','exact');
+    }
+   }
+   if(textLayout&&align==='left')p.getElementsByTagNameNS(W,'pPr')[0].append(w('jc',{'w:val':'left'}));
+   for(const rp of p.getElementsByTagNameNS(W,'rPr')){
+    if(textLayout?.fontFamily){
+     const fonts=rp.getElementsByTagNameNS(W,'rFonts')[0];
+     for(const slot of ['ascii','hAnsi','eastAsia','cs'])fonts.setAttributeNS(W,'w:'+slot,textLayout.fontFamily);
+    }
+    if(textLayout?.bold)rp.append(w('b'),w('bCs'));
+    const color=w('color');
+    color.setAttributeNS(W,'w:val',textColor);
+    rp.append(color);
+   }
    content.append(p);box.append(content);shape.append(box);
   }
-  shape.append(s('bodyPr',{vert:'horz',wrap:'square',lIns:emu(1),tIns:0,rIns:emu(1),bIns:0,anchor:text!==undefined?'ctr':'t',anchorCtr:0,upright:1}));data.append(shape);graphic.append(data);anchor.append(graphic);drawing.append(anchor);r.append(drawing);return r;
+  const layout=textLayout||{};
+  const body=s('bodyPr',{vert:'horz',wrap:layout.singleLine?'none':'square',
+   lIns:emu(layout.leftInset??1),tIns:emu(layout.topInset??0),rIns:emu(layout.rightInset??1),bIns:emu(layout.bottomInset??0),
+   anchor:layout.anchor??(text!==undefined?'ctr':'t'),anchorCtr:0,upright:1});
+  if(layout.singleLine)body.append(a('noAutofit'));
+  shape.append(body);
+  data.append(shape);graphic.append(data);anchor.append(graphic);drawing.append(anchor);r.append(drawing);return r;
  }
  function line(name,x1,y1,x2,y2,{arrow=false,color='333333',width=.8}={}){return nativeShape({name,x:Math.min(x1,x2),y:Math.min(y1,y2),width:Math.max(.01,Math.abs(x2-x1)),height:Math.max(.01,Math.abs(y2-y1)),geometry:'line',stroke:color,lineWidth:width,arrow,flipH:x2<x1,flipV:y2<y1,connector:true});}
+ function canvasShape(object,scale){
+  const {type}=object,connector=type==='line'||type==='arrow',fontSize=object.fontSize*scale;
+  const text=connector?undefined:window.SOP_OBJECTS.wrapText(object.text,window.SOP_OBJECTS.flowTextWidth(object),object.fontSize).join('\n');
+  return nativeShape({name:'画布对象 '+object.id,x:object.x*scale,y:object.y*scale,width:object.w*scale,height:object.h*scale,
+   geometry:({text:'rect',arrow:'line',line:'line',ellipse:'ellipse',diamond:'diamond',triangle:'triangle'})[type]||'rect',
+   text,stroke:type==='text'?null:object.color.slice(1),fill:object.fill==='transparent'?null:object.fill.slice(1),
+   lineWidth:object.strokeWidth*scale,fontSize,textColor:object.color.slice(1),align:type==='text'?'left':'center',
+   arrow:type==='arrow',arrowSize:type==='arrow'?'lg':'med',flipH:!!object.flipX,flipV:!!object.flipY,connector,
+   textLayout:connector?null:{fontFamily:canvasFont,lineHeight:fontSize*1.2,leftInset:type==='text'?4*scale:0,rightInset:0,
+    topInset:type==='triangle'?object.h*.44*scale:0,bottomInset:fontSize*.14}});
+ }
  function photoMarks(photo,left,top,width,height){
   const result=[];
   for(const [i,m]of (photo.marks||[]).entries()){
@@ -32,7 +68,16 @@ function create(doc,{nextId,paragraph}){
    if(m.type==='line')result.push(line(name,x,y,x2,y2,{color,width:1.2}));
    else if(m.type==='arrow')result.push(line(name,x,y,x2,y2,{arrow:true,color,width:1.2}));
    else if(m.type==='circle'||m.type==='rect')result.push(nativeShape({name,x:Math.min(x,x2),y:Math.min(y,y2),width:Math.max(.5,Math.abs(x2-x)),height:Math.max(.5,Math.abs(y2-y)),geometry:m.type==='rect'?'rect':'ellipse',stroke:color,lineWidth:1.2}));
-   else if(m.type==='text'){const fontSize=width*(Number(m.fontSize)||1/28),text=String(m.text||'标注'),textWidth=Math.max(30,Array.from(text).reduce((n,c)=>n+(c.charCodeAt(0)>255?1:.58),0)*fontSize+4);result.push(nativeShape({name,x:x-1,y:y-fontSize,width:textWidth,height:fontSize*1.6,geometry:'rect',text,stroke:null,fill:m.background==='transparent'?null:hex(m.background||'#fff7b7'),fontSize,textColor:color,align:'left'}));}
+   else if(m.type==='text'){
+    // Canvas fillText renders each photo annotation on a single line.
+    const fontSize=width*(Number(m.fontSize)||1/28),text=String(m.text||'标注'),padding=width/200;
+    const context=document.createElement('canvas').getContext('2d');
+    context.font='600 '+fontSize+'px "'+canvasFont+'",sans-serif';
+    const textWidth=context.measureText(text).width;
+    result.push(nativeShape({name,x:x-padding,y:y-fontSize,width:textWidth+2*padding,height:fontSize*1.4,text,stroke:null,
+     fill:m.background==='transparent'?null:hex(m.background||'#fff7b7'),fontSize,textColor:color,align:'left',
+     textLayout:{fontFamily:canvasFont,bold:true,singleLine:true,lineHeight:fontSize*1.2,leftInset:padding,rightInset:padding,bottomInset:fontSize*.14}}));
+   }
   }
   return result;
  }
@@ -74,7 +119,7 @@ function create(doc,{nextId,paragraph}){
    if(i<pages.length-1){const points=row===7?[[x+380,y+29],[x+430,y+29],[x+430,64],[x+460,64]]:[[x+190,y+58],[x+190,y+96]];for(let j=0;j<points.length-1;j++)p.append(line('流程连线 '+(chunk*24+i+1)+'.'+(j+1),points[j][0]*sx,points[j][1]*sy,points[j+1][0]*sx,points[j+1][1]*sy,{arrow:j===points.length-2}));}
   });return centerFlow(p,width,height);
  }
- return {nativeShape,photoMarks,flowParagraph};
+ return {nativeShape,canvasShape,photoMarks,flowParagraph};
 }
 window.SOP_NATIVE={create};
 })();

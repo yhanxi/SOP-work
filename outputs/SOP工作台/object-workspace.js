@@ -383,6 +383,73 @@ function generateFlow(rows,columns){
 
 function remove(m,key){syncConnections(m);m.objects=m.objects.filter(o=>o.id!==key);const removed=new Set(m.edges.filter(e=>e.id===key||e.from===key||e.to===key).map(e=>e.id));m.edges=m.edges.filter(e=>!removed.has(e.id)&&!removed.has(e.join));syncConnections(m);}
 function duplicate(m,key){const o=m.objects.find(x=>x.id===key);if(!o)return null;const n={...clone(o),id:id(),x:Math.min(m.width-o.w,o.x+20),y:Math.min(m.height-o.h,o.y+20)};delete n.attachments;delete n.processId;delete n.prefix;m.objects.push(n);return n.id;}
+const PHOTO_MAX_EDGE=1800,PHOTO_REENCODE_BYTES=1.5*1024*1024,PHOTO_MAX_BYTES=35*1024*1024;
+function photoMime(data){return /^data:(image\/(?:png|jpeg|webp));base64,/i.exec(data)?.[1].toLowerCase();}
+function encodePhotoCanvas(canvas,source,format=photoMime(source)||'image/png'){
+ const data=canvas.toDataURL(format,.9);
+ if(!photoMime(data))throw Error('无法编码图片，请换一张图片。');
+ return data;
+}
+function opaquePhoto(context,width,height){
+ const pixels=context.getImageData(0,0,width,height).data;
+ const colors=new Set(),stride=Math.max(1,Math.floor(width*height/3000))*4;
+ let samples=0,shaded=0;
+ // Preserve transparent images and avoid lossy encoding of flat-color diagrams.
+ for(let index=0;index<pixels.length;index+=4){
+  if(pixels[index+3]!==255)return false;
+  if(index%stride===0){
+   const red=pixels[index]>>3,green=pixels[index+1]>>3,blue=pixels[index+2]>>3;
+   colors.add((red<<10)|(green<<5)|blue);
+   if(index+4<pixels.length){
+    const delta=Math.max(Math.abs(pixels[index]-pixels[index+4]),Math.abs(pixels[index+1]-pixels[index+5]),Math.abs(pixels[index+2]-pixels[index+6]));
+    if(delta>=2&&delta<=48)shaded++;
+    samples++;
+   }
+  }
+ }
+ return colors.size>=256||(colors.size>=20&&shaded>samples*.22);
+}
+async function readPhoto(source,{allowOtherFormats=false}={}){
+ let data=source;
+ if(typeof source!=='string'){
+  if(!allowOtherFormats&&!/^image\/(png|jpeg|webp)$/i.test(source.type))throw Error('请选择 PNG、JPEG 或 WebP 图片。');
+  if(source.size>PHOTO_MAX_BYTES)throw Error('单张图片请控制在 35MB 以内。');
+  data=await new Promise((resolve,reject)=>{
+   const reader=new FileReader();
+   reader.onload=()=>resolve(reader.result);
+   reader.onerror=reader.onabort=()=>reject(Error('无法读取图片。'));
+   reader.readAsDataURL(source);
+  });
+ }
+ const format=photoMime(data);
+ if(!format&&!allowOtherFormats)throw Error('请选择 PNG、JPEG 或 WebP 图片。');
+ const image=new Image();
+ image.src=data;
+ try{await image.decode();}catch{throw Error('无法读取这张图片，请重新选择或粘贴。');}
+ const sourceWidth=image.naturalWidth,sourceHeight=image.naturalHeight;
+ if(!sourceWidth||!sourceHeight)throw Error('无法读取图片尺寸。');
+ const edge=Math.max(sourceWidth,sourceHeight),overEdge=edge>PHOTO_MAX_EDGE;
+ const largeFile=(data.length-data.indexOf(',')-1)*.75>PHOTO_REENCODE_BYTES;
+ const sourcePhoto={data,width:sourceWidth,height:sourceHeight,sourceWidth,sourceHeight};
+ if(format&&!overEdge&&!largeFile)return sourcePhoto;
+ const scale=Math.min(1,PHOTO_MAX_EDGE/edge),canvas=document.createElement('canvas');
+ canvas.width=Math.max(1,Math.round(sourceWidth*scale));
+ canvas.height=Math.max(1,Math.round(sourceHeight*scale));
+ const context=canvas.getContext('2d');
+ if(!context)throw Error('无法压缩图片，请换一张图片。');
+ context.imageSmoothingQuality='high';
+ context.drawImage(image,0,0,canvas.width,canvas.height);
+ let best=data;
+ if(!format||overEdge||format!=='image/png'){
+  const encoded=encodePhotoCanvas(canvas,data);
+  if(!format||encoded.length<data.length)best=encoded;
+ }
+ if(format==='image/png'&&largeFile&&opaquePhoto(context,canvas.width,canvas.height)){
+  const jpeg=encodePhotoCanvas(canvas,null,'image/jpeg');
+  if(jpeg.length<=best.length*.8)best=jpeg;
+ }
+ return best===data?sourcePhoto:{data:best,width:canvas.width,height:canvas.height,sourceWidth,sourceHeight};
+}
 function fromPhotos(photos){
  const m={width:900,height:520,objects:[],edges:[]};
  (photos||[]).forEach((ph,i)=>{const x=40+(i%2)*440,y=40+Math.floor(i/2)*270,ratio=(ph.width&&ph.height)?ph.width/ph.height:1,w=Math.min(370,200*ratio),h=w/ratio;m.height=Math.max(m.height,y+h+70);m.objects.push({id:id(),type:'photo',data:ph.data,caption:ph.caption||'',x,y,w,h});
@@ -664,41 +731,24 @@ function open(input,{title='图文画布',flow=false,photos=[],availableHeight,p
   let addingPhoto=false;
   async function addPhoto(file,{pasted=false}={}){
    if(!file||addingPhoto)return;
-   if(!/^image\/(png|jpeg|webp)$/i.test(file.type)){message('请选择 PNG、JPEG 或 WebP 图片。');return;}
-   if(file.size>15*1024*1024){message('单张图片请控制在 15MB 以内。');return;}
    if(m.objects.length>=300){message('画布对象已满，请先删除不需要的对象。');return;}
    addingPhoto=true;
    try{
-    const data=await new Promise((resolve,reject)=>{
-     const reader=new FileReader();
-     reader.onload=()=>resolve(reader.result);
-     reader.onerror=()=>reject(Error('无法读取图片。'));
-     reader.readAsDataURL(file);
-    });
-    const image=new Image();image.src=data;await image.decode();
+    const {data,sourceWidth,sourceHeight}=await readPhoto(file);
     if(!d.open||!d.isConnected)return;
     if(creating||drag||inlineEdit){message('请先完成当前编辑，再添加图片。');return;}
     const area=bounds();
     if(area.height<10){message('图文区剩余空间不足，请先调整正文。');return;}
-    const scale=Math.min(360/image.naturalWidth,240/image.naturalHeight,area.width/image.naturalWidth,area.height/image.naturalHeight);
-    const w=image.naturalWidth*scale,h=image.naturalHeight*scale;
+    const scale=Math.min(360/sourceWidth,240/sourceHeight,area.width/sourceWidth,area.height/sourceHeight);
+    const w=sourceWidth*scale,h=sourceHeight*scale;
     const x=pasted?(area.width-w)/2:Math.min(80,area.width-w);
     const y=pasted?(area.height-h)/2:Math.min(80,area.height-h);
-    let source=data;
-    const maxDimension=Math.max(image.naturalWidth,image.naturalHeight);
-    if(pasted&&maxDimension>1800){
-     const ratio=1800/maxDimension;
-     const canvas=document.createElement('canvas');
-     canvas.width=Math.max(1,Math.round(image.naturalWidth*ratio));
-     canvas.height=Math.max(1,Math.round(image.naturalHeight*ratio));
-     canvas.getContext('2d').drawImage(image,0,0,canvas.width,canvas.height);
-     source=canvas.toDataURL(file.type,.92);
-    }
-    const photo={id:id(),type:'photo',data:source,x,y,w,h,aspectRatio:w/h};
+    if(m.objects.length>=300){message('画布对象已满，请先删除不需要的对象。');return;}
+    const photo={id:id(),type:'photo',data,x,y,w,h,aspectRatio:w/h};
     push();m=normalize({...m,objects:[...m.objects,photo]});
     selected=photo.id;picked=[];tool='';snap=null;boxMode=false;
     draw();message(pasted?'已粘贴图片，可拖动或缩放。':'已添加图片，可拖动或缩放。');
-   }catch{if(d.open)message('无法读取这张图片，请重新复制或从文件添加。');}
+   }catch(error){if(d.open)message(error.message||'无法读取这张图片，请重新复制或从文件添加。');}
    finally{addingPhoto=false;}
   }
   input.onchange=()=>{const file=input.files[0];input.value='';void addPhoto(file);};
@@ -717,5 +767,5 @@ function open(input,{title='图文画布',flow=false,photos=[],availableHeight,p
  }
  if(ev.key==='Escape'&&(tool||creating)){ev.preventDefault();if(creating){m=history.pop();creating=null;selected='';}tool='';snap=null;draw();message('已取消绘制');return;}if(/INPUT|TEXTAREA|SELECT/.test(ev.target.tagName))return;if(ev.key==='F2'){ev.preventDefault();beginInline();return;}if(ev.key==='Delete'){ev.preventDefault();action('delete');}if((ev.ctrlKey||ev.metaKey)&&ev.key.toLowerCase()==='z'){ev.preventDefault();action('undo');}if((ev.ctrlKey||ev.metaKey)&&ev.key.toLowerCase()==='d'){ev.preventDefault();action('copy');}};d.oncancel=dispose;draw();if(drawingHeight)message(contentHeight(m)>drawingHeight?'白色区域为文字之外的可用画布；灰色区域有超出元素，请手动移回或缩小。':'白色区域为文字之外的可用画布；文字和图片不自动缩放。');d.showModal();if(!flow)q('.object-stage').focus({preventScroll:true});
 }
-const api={contentHeight,attachEndpoint,syncConnections,anchorPoints,nearestAnchor,resizeCorner,lineEndpoints,setLineEndpoints,lineAngle,setLineAngle,wrapText,flowTextWidth,normalize,edgePoints,flowRoute,flowLabel,flowShapes,generateFlow,resolvedFlow,remove,duplicate,fromPhotos,restorePhotoCaptions,fromProcesses,svg,open};if(typeof module!=='undefined')module.exports=api;root.SOP_OBJECTS=api;
+const api={photoMaxEdge:PHOTO_MAX_EDGE,readPhoto,encodePhotoCanvas,contentHeight,attachEndpoint,syncConnections,anchorPoints,nearestAnchor,resizeCorner,lineEndpoints,setLineEndpoints,lineAngle,setLineAngle,wrapText,flowTextWidth,normalize,edgePoints,flowRoute,flowLabel,flowShapes,generateFlow,resolvedFlow,remove,duplicate,fromPhotos,restorePhotoCaptions,fromProcesses,svg,open};if(typeof module!=='undefined')module.exports=api;root.SOP_OBJECTS=api;
 })(typeof window==='undefined'?globalThis:window);

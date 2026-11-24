@@ -7,7 +7,46 @@ const cell=(t,r,c)=>children(children(t,'tr')[r],'tc')[c],cells=r=>children(r,'t
 function el(doc,name,attrs={}){const e=doc.createElementNS(W,'w:'+name);for(const [k,v]of Object.entries(attrs))e.setAttributeNS(W,'w:'+k,String(v));return e;}
 function run(doc,text,size=21){const r=el(doc,'r'),pr=el(doc,'rPr');pr.append(el(doc,'rFonts',{ascii:'宋体',hAnsi:'宋体',eastAsia:'宋体'}),el(doc,'snapToGrid',{val:0}),el(doc,'sz',{val:size}),el(doc,'szCs',{val:size}));r.append(pr);String(text??'').split('\n').forEach((line,i)=>{if(i)r.append(el(doc,'br'));const t=el(doc,'t');t.setAttribute('xml:space','preserve');t.textContent=line;r.append(t);});return r;}
 function para(doc,text='',size=21,center=false){const p=el(doc,'p'),pr=el(doc,'pPr');pr.append(el(doc,'snapToGrid',{val:0}),el(doc,'spacing',{before:0,after:30,line:280,lineRule:'auto'}));if(center)pr.append(el(doc,'jc',{val:'center'}));p.append(pr,run(doc,text,size));return p;}
-function bodyParagraph(doc,runs,page,key){const f=window.SOP.textStyle(page,key),p=para(doc,'',Math.round(f.fontSize*2));first(p,'r').remove();for(const segment of runs){const r=run(doc,segment.text,Math.round(f.fontSize*2)),pr=first(r,'rPr');pr.append(el(doc,'spacing',{val:Math.round(f.letterSpacing*20)}));if(segment.color)pr.append(el(doc,'color',{val:segment.color.slice(1).toUpperCase()}));if(segment.background==='#ffff00')pr.append(el(doc,'highlight',{val:'yellow'}));else if(segment.background)pr.append(el(doc,'shd',{val:'clear',color:'auto',fill:segment.background.slice(1).toUpperCase()}));p.append(r);}const spacing=first(first(p,'pPr'),'spacing');spacing.setAttributeNS(W,'w:line',Math.round(f.fontSize*1.4*20));spacing.setAttributeNS(W,'w:lineRule','exact');spacing.setAttributeNS(W,'w:after','113');return p;}
+const {operationText,dimensions:operationDimensions}=window.SOP_TEMPLATE;
+const fullWidthText=/[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}\p{Script=Bopomofo}\u3000-\u303f\ufe10-\ufe19\ufe30-\ufe6f\uff01-\uff60\uffe0-\uffe6]/u;
+const halfWidthEastAsian=/[\uff61-\uffdc]/u;
+const compressiblePunctuation=/[\u3001\u3002\u3008-\u3011\u3014-\u301f\uff01\uff08\uff09\uff0c\uff0e\uff1a\uff1b\uff1f\uff3b\uff3d\uff5b\uff5d]/u;
+function operationRuns(runs){
+ return runs.flatMap(({text,...style})=>{
+  const segments=[];
+  for(const character of text){
+   const kind=compressiblePunctuation.test(character)?'punctuation':fullWidthText.test(character)&&!halfWidthEastAsian.test(character)?'fullWidth':'default';
+   const last=segments.at(-1);
+   if(kind!=='punctuation'&&last?.kind===kind)last.text+=character;
+   else segments.push({...style,text:character,kind});
+  }
+  return segments;
+ });
+}
+function exactParagraphSpacing(doc,p,line,after=0){
+ first(first(p,'pPr'),'spacing').replaceWith(el(doc,'spacing',{before:0,after,line,lineRule:'exact'}));
+}
+function bodyParagraph(doc,runs,page,key,nextFitId){
+ const f=window.SOP.textStyle(page,key),size=Math.round(f.fontSize*2),p=para(doc,'',size),pr=first(p,'pPr');
+ first(p,'r').remove();
+ // Match the workbench's text spacing, including mixed Chinese and Latin text.
+ pr.prepend(el(doc,'overflowPunct',{val:0}),el(doc,'autoSpaceDE',{val:0}),el(doc,'autoSpaceDN',{val:0}),el(doc,'adjustRightInd',{val:0}));
+ exactParagraphSpacing(doc,p,Math.round(f.fontSize*operationText.lineHeight*20),operationText.paragraphAfter);
+ pr.append(el(doc,'contextualSpacing',{val:0}),el(doc,'jc',{val:'left'}));
+ for(const segment of operationRuns(runs)){
+  const r=run(doc,segment.text,size),style=first(r,'rPr');
+  // The reference keeps half/full-width balance for its labels and imported originals.
+  // Word and WPS double tracking on generated full-width runs with that option enabled.
+  if(segment.kind!=='default')style.prepend(el(doc,'rStyle',{val:operationText.fullWidthStyleId}));
+  style.append(el(doc,'spacing',{val:Math.round(f.letterSpacing*(segment.kind==='default'?20:10))}));
+  if(segment.kind==='punctuation')style.append(el(doc,'fitText',{val:Math.round((f.fontSize+f.letterSpacing)*20),id:nextFitId()}));
+  if(segment.color)style.append(el(doc,'color',{val:segment.color.slice(1).toUpperCase()}));
+  if(segment.background==='#ffff00')style.append(el(doc,'highlight',{val:'yellow'}));
+  else if(segment.background)style.append(el(doc,'shd',{val:'clear',color:'auto',fill:segment.background.slice(1).toUpperCase()}));
+  p.append(r);
+ }
+ return p;
+}
 const cleanHeaderText=text=>String(text??'').replace(/[\t\r\n]+/g,' ').trim();
 function setCell(c,s,size=19){const doc=c.ownerDocument;for(const child of [...c.children])if(child.localName!=='tcPr')c.removeChild(child);c.append(para(doc,s,size));}
 function centerExisting(c){let pr=first(c,'tcPr');if(!pr){pr=el(c.ownerDocument,'tcPr');c.prepend(pr);}for(const x of children(pr,'vAlign'))x.remove();pr.append(el(c.ownerDocument,'vAlign',{val:'center'}));for(const paragraph of children(c,'p')){let pp=first(paragraph,'pPr');if(!pp){pp=el(c.ownerDocument,'pPr');paragraph.prepend(pp);}for(const x of [...children(pp,'jc'),...children(pp,'ind'),...children(pp,'spacing')])x.remove();pp.append(el(c.ownerDocument,'jc',{val:'center'}),el(c.ownerDocument,'ind',{left:0,right:0,firstLine:0}),el(c.ownerDocument,'spacing',{before:0,after:0,line:280,lineRule:'auto'}));}}
@@ -38,37 +77,93 @@ const historyFields=['date','number','version','summary','author','reviewer','ap
 const materialFields=['name','spec','qty'];
 const checkFields=['feature','standard','self','audit','importance','method'];
 const revisionFields=['number','mark','count','document','signature'];
+const coverSignerFields={批准:['approver','approverSignature'],质量会签:['qualitySigner','qualitySignature'],生产会签:['productionSigner','productionSignature'],审核:['reviewer','reviewerSignature'],制定:['author','authorSignature']};
+function coverSignatureTable(doc,meta){
+ // Match the cover preview's 20/27/14/29 mm columns, separated by 1 mm gaps.
+ const widths=[5720,...[20,1,27,1,14,1,29].map(mm=>Math.round(mm*1440/25.4))];
+ const width=widths.reduce((sum,w)=>sum+w,0),table=el(doc,'tbl'),pr=el(doc,'tblPr'),grid=el(doc,'tblGrid');
+ const borders=el(doc,'tblBorders'),margins=el(doc,'tblCellMar');
+ for(const edge of ['top','left','bottom','right','insideH','insideV'])borders.append(el(doc,edge,{val:'nil'}));
+ for(const edge of ['top','left','bottom','right'])margins.append(el(doc,edge,{w:0,type:'dxa'}));
+ pr.append(el(doc,'tblW',{w:width,type:'dxa'}),el(doc,'jc',{val:'left'}),borders,el(doc,'tblLayout',{type:'fixed'}),margins);
+ grid.append(...widths.map(w=>el(doc,'gridCol',{w})));
+ table.append(pr,grid);
+ function appendRow(height){
+  const row=el(doc,'tr'),properties=el(doc,'trPr');
+  properties.append(el(doc,'cantSplit'),el(doc,'trHeight',{val:height,hRule:'exact'}));
+  row.append(properties);
+  table.append(row);
+  return row;
+ }
+ function appendSpacer(height){
+  const spacer=el(doc,'tc'),properties=el(doc,'tcPr');
+  properties.append(el(doc,'tcW',{w:width,type:'dxa'}),el(doc,'gridSpan',{val:widths.length}));
+  spacer.append(properties,el(doc,'p'));
+  appendRow(height).append(spacer);
+ }
+ // Preserve the source paragraphs' pitch and text baseline.
+ const rowHeight=600+156,signatureHeight=532;
+ for(const [label,[name,signature]]of Object.entries(coverSignerFields)){
+  const labelText=label.length===2?[...label].join('　'):label;
+  const values=['',labelText+'：','',meta[name],'','签字：','',meta[signature]];
+  const row=appendRow(signatureHeight);
+  for(const [i,w]of widths.entries()){
+   const c=el(doc,'tc'),properties=el(doc,'tcPr'),p=para(doc,values[i],22,i>1);
+   properties.append(el(doc,'tcW',{w,type:'dxa'}));
+   if(i===3||i===7){
+    const rule=el(doc,'tcBorders');
+    rule.append(el(doc,'bottom',{val:'single',sz:4,space:0,color:'111111'}));
+    properties.append(rule);
+   }
+   properties.append(el(doc,'vAlign',{val:'bottom'}));
+   first(first(p,'pPr'),'spacing').replaceWith(el(doc,'spacing',{before:0,after:0,line:255,lineRule:'exact'}));
+   c.append(properties,p);
+   row.append(c);
+  }
+  appendSpacer(rowHeight-signatureHeight);
+ }
+ // Reserve the template's final blank row within the table so Word and WPS agree on its height.
+ appendSpacer(rowHeight);
+ return table;
+}
 function referenceCover(t,project){
  const ps=desc(t,'p'),c=project.frontContent||{},m=coverValues(project);
  fillParagraph(ps[1],c.coverHeading??'三阶文件');
  fillParagraph(ps[2],project.settings.company);
  const info=[m.number,[m.product,m.title].filter(Boolean).join(' '),m.bare,m.packed,m.version,m.date];
  for(const [i,value]of info.entries())fillParagraph(ps[i+3],txt(ps[i+3]).replace('[[VALUE]]',()=>value||''));
- for(const [i,[name,signature]]of [['approver','approverSignature'],['qualitySigner','qualitySignature'],['productionSigner','productionSignature'],['reviewer','reviewerSignature'],['author','authorSignature']].entries()){
-  const p=ps[i+9],doc=p.ownerDocument;
-  const [prefix,afterName]=txt(p).split('[[NAME]]'),middle=afterName.split('[[SIGNATURE]]')[0];
-  const base=fillParagraph(p,prefix),styled=(value,underlined=false)=>{
-   const r=run(doc,value,22),pr=first(base,'rPr');
-   if(pr)first(r,'rPr').replaceWith(pr.cloneNode(true));
-   if(underlined)first(r,'rPr').append(el(doc,'u',{val:'single'}));
-   return r;
-  };
-  p.append(styled(m[name]||'         ',true),styled(middle),styled(m[signature]||'                   ',true));
- }
+ const signerParagraphs=ps.slice(9,14);
+ signerParagraphs[0].before(coverSignatureTable(t.ownerDocument,m));
+ for(const p of signerParagraphs)p.remove();
+ const doc=t.ownerDocument,pr=el(doc,'pPr');
+ pr.append(el(doc,'snapToGrid',{val:0}),el(doc,'spacing',{before:0,after:0,line:1,lineRule:'exact'}));
+ ps[14].replaceChildren(pr);
 }
-const coverSignerFields={批准:['approver','approverSignature'],质量会签:['qualitySigner','qualitySignature'],生产会签:['productionSigner','productionSignature'],审核:['reviewer','reviewerSignature'],制定:['author','authorSignature']};
+function coverSignerCells(row){
+ if(row?.localName!=='tr')return;
+ const cs=cells(row),label=txt(cs[1]).replace(/[\s：:]/g,'');
+ if(cs.length===8&&Object.hasOwn(coverSignerFields,label)&&/^签字[：:]$/.test(txt(cs[5]).trim()))return {label,name:cs[3],signature:cs[7]};
+}
 function readCoverValues(table){
  const result={};
  for(const p of desc(table,'p')){
+  if(coverSignerCells(p.parentElement?.parentElement))continue;
   const m=txt(p).match(/^([^：:]+)[：:](.*)$/s);if(!m)continue;
   const key=m[1].replace(/\s/g,''),value=m[2].trim();
   const field={文件编号:'number',裸机成品料号:'bare',包装成品料号:'packed',版本:'version',生效日期:'date'}[key];
   if(field)result[field]=value;
-  if(coverSignerFields[key]){
+  if(Object.hasOwn(coverSignerFields,key)){
    const [name,signature]=value.split(/\s*签字[：:]\s*/);
    result[coverSignerFields[key][0]]=name.trim();
    result[coverSignerFields[key][1]]=signature?.trim()||'';
   }
+ }
+ for(const row of desc(table,'tr')){
+  const fields=coverSignerCells(row);
+  if(!fields)continue;
+  const [name,signature]=coverSignerFields[fields.label];
+  result[name]=txt(fields.name).trim();
+  result[signature]=txt(fields.signature).trim();
  }
  return result;
 }
@@ -116,28 +211,102 @@ async function exportDocx(project,layout,front){
   const margins=first(first(c,'tcPr'),'tcMar')||first(first(t,'tblPr'),'tblCellMar');
   return (twips(first(first(c,'tcPr'),'tcW'),'w')-twips(first(margins,'left'),'w')-twips(first(margins,'right'),'w'))/20;
  };
- const contentWidth=tableCellWidth(base,cell(base,3,2));
- let imageN=0,drawingN=16002;
+ const contentWidth=operationDimensions.operationContentWidthTwips/20;
+ let imageN=0,pictureN=0,drawingN=16002,fitTextN=0;
+ const nextFitId=()=>++fitTextN;
+ const mediaByData=new Map();
  const native=window.SOP_NATIVE.create(d,{nextId:()=>++drawingN,paragraph:para});
+ async function pictureMedia(source){
+  const existing=mediaByData.get(source);
+  if(existing)return existing;
+  let data=source;
+  const jpeg=data.startsWith('data:image/jpeg'),ext=jpeg?'jpeg':'png';
+  if(!jpeg&&!data.startsWith('data:image/png')){
+   const im=await new Promise((resolve,reject)=>{const im=new Image();im.onload=()=>resolve(im);im.onerror=()=>reject(Error('无法读取作业图片，请替换后重试。'));im.src=data;});
+   const canvas=document.createElement('canvas');canvas.width=im.width;canvas.height=im.height;canvas.getContext('2d').drawImage(im,0,0);data=canvas.toDataURL('image/png');
+  }
+  const [width,height]=await imageSize(data);
+  const name='sop-image-'+(++imageN)+'.'+ext;
+  z.file('word/media/'+name,data.split(',')[1],{base64:true});
+  if(![...ct.documentElement.children].some(e=>e.getAttribute('Extension')===ext)){
+   const type=ct.createElementNS(CT,'Default');type.setAttribute('Extension',ext);type.setAttribute('ContentType',jpeg?'image/jpeg':'image/png');ct.documentElement.append(type);
+  }
+  const media={name,width,height};
+  mediaByData.set(source,media);
+  return media;
+ }
  async function picture(data,widthPt,heightPt,label){
-  const jpeg=data.startsWith('data:image/jpeg'),ext=jpeg?'jpeg':'png';if(!jpeg&&!data.startsWith('data:image/png')){const im=await new Promise((resolve,reject)=>{const im=new Image();im.onload=()=>resolve(im);im.onerror=()=>reject(Error('无法读取作业图片，请替换后重试。'));im.src=data;});const c=document.createElement('canvas');c.width=im.width;c.height=im.height;c.getContext('2d').drawImage(im,0,0);data=c.toDataURL('image/png');}
-  const name='sop-image-'+(++imageN)+'.'+ext,rid='rIdSopImage'+imageN;z.file('word/media/'+name,data.split(',')[1],{base64:true});const rel=rels.createElementNS(P,'Relationship');rel.setAttribute('Id',rid);rel.setAttribute('Type',R+'/image');rel.setAttribute('Target','media/'+name);rels.documentElement.append(rel);
-  if(![...ct.documentElement.children].some(e=>e.getAttribute('Extension')===ext)){const e=ct.createElementNS(CT,'Default');e.setAttribute('Extension',ext);e.setAttribute('ContentType',jpeg?'image/jpeg':'image/png');ct.documentElement.append(e);}
-  const [w,h]=await imageSize(data),scale=Math.min(widthPt/w,heightPt/h),cx=Math.round(w*scale*12700),cy=Math.round(h*scale*12700),id=++drawingN;
-  const p=xml(`<w:r xmlns:w="${W}" xmlns:r="${R}" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0"><wp:extent cx="${cx}" cy="${cy}"/><wp:docPr id="${id}" name="SOP配图${imageN}"/><wp:cNvGraphicFramePr><a:graphicFrameLocks noChangeAspect="1"/></wp:cNvGraphicFramePr><a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic><pic:nvPicPr><pic:cNvPr id="${id}" name="SOP配图${imageN}"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="${rid}"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r>`).documentElement;
+  const {name,width:w,height:h}=await pictureMedia(data);
+  const scale=Math.min(widthPt/w,heightPt/h),cx=Math.round(w*scale*12700),cy=Math.round(h*scale*12700),id=++drawingN;
+  const pictureIndex=++pictureN,rid='rIdSopImage'+pictureIndex;
+  const rel=rels.createElementNS(P,'Relationship');rel.setAttribute('Id',rid);rel.setAttribute('Type',R+'/image');rel.setAttribute('Target','media/'+name);rels.documentElement.append(rel);
+  const p=xml(`<w:r xmlns:w="${W}" xmlns:r="${R}" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0"><wp:extent cx="${cx}" cy="${cy}"/><wp:docPr id="${id}" name="SOP配图${pictureIndex}"/><wp:cNvGraphicFramePr><a:graphicFrameLocks noChangeAspect="1"/></wp:cNvGraphicFramePr><a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic><pic:nvPicPr><pic:cNvPr id="${id}" name="SOP配图${pictureIndex}"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="${rid}"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r>`).documentElement;
   const dp=p.getElementsByTagNameNS('http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing','docPr')[0];dp.setAttribute('descr',String(label||'作业图片'));return d.importNode(p,true);
  }
- function operationHeading(text){const p=para(d,text,24),sp=first(first(p,'pPr'),'spacing');sp.setAttributeNS(W,'w:line','336');sp.setAttributeNS(W,'w:lineRule','exact');sp.setAttributeNS(W,'w:after','113');return p;}
+ function operationHeading(text,after=operationText.headingAfter){
+  const {headingSize,lineHeight}=operationText,p=para(d,text,headingSize*2);
+  exactParagraphSpacing(d,p,Math.round(headingSize*lineHeight*20),after);
+  return p;
+ }
+ function drawingParagraph(height){
+  const p=para(d,'',2);
+  exactParagraphSpacing(d,p,Math.max(20,Math.round(height*20)));
+  return p;
+ }
+ function anchorPicture(r,x,y,width,height){
+  const ns='http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing';
+  const inline=r.getElementsByTagNameNS(ns,'inline')[0];
+  const wp=(name,attrs={})=>{const e=d.createElementNS(ns,'wp:'+name);for(const [k,v]of Object.entries(attrs))e.setAttribute(k,v);return e;};
+  const anchor=wp('anchor',{distT:0,distB:0,distL:0,distR:0,simplePos:0,relativeHeight:++drawingN,behindDoc:0,locked:0,layoutInCell:1,allowOverlap:1});
+  anchor.append(wp('simplePos',{x:0,y:0}));
+  for(const [dir,relativeFrom,position]of [['H','column',x],['V','paragraph',y]]){
+   const node=wp('position'+dir,{relativeFrom}),offset=wp('posOffset');
+   offset.textContent=Math.round(position*12700);
+   node.append(offset);anchor.append(node);
+  }
+  if(width!==undefined){
+   const extent=inline.getElementsByTagNameNS(ns,'extent')[0];
+   for(const node of [extent,...inline.getElementsByTagNameNS('http://schemas.openxmlformats.org/drawingml/2006/main','ext')]){
+    node.setAttribute('cx',Math.round(width*12700));node.setAttribute('cy',Math.round(height*12700));
+   }
+  }
+  for(const child of [...inline.children]){
+   if(child.localName==='docPr')anchor.append(wp('wrapNone'));
+   anchor.append(child);
+  }
+  inline.replaceWith(anchor);
+  return r;
+ }
  async function canvasParagraph(model,width,availableHeightPt){
-  const m=window.SOP_OBJECTS.normalize(model),scale=width/m.width,pp=para(d,'',2),spacing=first(first(pp,'pPr'),'spacing');spacing.setAttributeNS(W,'w:line',String(Math.max(20,Math.round((Number.isFinite(availableHeightPt)?availableHeightPt:window.SOP_OBJECTS.contentHeight(m)*scale)*20))));spacing.setAttributeNS(W,'w:lineRule','exact');spacing.setAttributeNS(W,'w:after','0');
+  const m=window.SOP_OBJECTS.normalize(model),scale=width/m.width;
+  const pp=drawingParagraph(Number.isFinite(availableHeightPt)?availableHeightPt:window.SOP_OBJECTS.contentHeight(m)*scale);
   for(const o of m.objects){const x=o.x*scale,y=o.y*scale,w=o.w*scale,h=o.h*scale;
-   if(o.type==='photo'){const r=await picture(o.data,w,h,'画布独立照片'),inline=r.getElementsByTagNameNS('http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing','inline')[0],ns=inline.namespaceURI,anchor=d.createElementNS(ns,'wp:anchor');for(const [key,value]of Object.entries({distT:0,distB:0,distL:0,distR:0,simplePos:0,relativeHeight:++drawingN,behindDoc:0,locked:0,layoutInCell:1,allowOverlap:1}))anchor.setAttribute(key,value);const wp=(name,attrs={})=>{const e=d.createElementNS(ns,'wp:'+name);for(const [k,v]of Object.entries(attrs))e.setAttribute(k,v);return e;};anchor.append(wp('simplePos',{x:0,y:0}));for(const [dir,rel,pos]of [['H','column',x],['V','paragraph',y]]){const n=wp('position'+dir,{relativeFrom:rel}),off=wp('posOffset');off.textContent=Math.round(pos*12700);n.append(off);anchor.append(n);}const extent=inline.getElementsByTagNameNS(ns,'extent')[0];extent.setAttribute('cx',Math.round(w*12700));extent.setAttribute('cy',Math.round(h*12700));for(const ext of inline.getElementsByTagNameNS('http://schemas.openxmlformats.org/drawingml/2006/main','ext')){ext.setAttribute('cx',Math.round(w*12700));ext.setAttribute('cy',Math.round(h*12700));}for(const child of [...inline.children]){if(child.localName==='docPr')anchor.append(wp('wrapNone'));anchor.append(child);}inline.replaceWith(anchor);pp.append(r,...native.photoMarks(o,x,y,w,h));
+   if(o.type==='photo'){
+    const r=await picture(o.data,w,h,'画布独立照片');
+    pp.append(anchorPicture(r,x,y,w,h),...native.photoMarks(o,x,y,w,h));
     if(o.caption){
      const lines=window.SOP_OBJECTS.wrapText(o.caption,o.w,14);
-     pp.append(native.nativeShape({name:'画布图片说明 '+o.id,x,y:y+h+4*scale,width:w,height:17*scale*lines.length,text:lines.join('\n'),stroke:null,fontSize:14*scale}));
+     // The SVG hanging baseline starts slightly above the top of a Word text paragraph.
+     pp.append(native.nativeShape({name:'画布图片说明 '+o.id,x,y:y+h-1.5*scale,width:w,height:17*scale*lines.length,text:lines.join('\n'),stroke:null,fontSize:14*scale,
+      textLayout:{fontFamily:'宋体',lineHeight:17*scale,leftInset:0,rightInset:0,anchor:'t'}}));
     }
-   }else pp.append(native.nativeShape({name:'画布对象 '+o.id,x,y,width:w,height:h,geometry:({text:'rect',arrow:'line',line:'line',ellipse:'ellipse',diamond:'diamond',triangle:'triangle'})[o.type]||'rect',text:['line','arrow'].includes(o.type)?undefined:window.SOP_OBJECTS.wrapText(o.text,o.w,o.fontSize).join('\n'),lineWidth:o.strokeWidth*scale,stroke:o.type==='text'?null:o.color.slice(1),fill:o.fill==='transparent'?null:o.fill.slice(1),fontSize:o.fontSize*scale,textColor:o.color.slice(1),align:o.type==='text'?'left':'center',arrow:o.type==='arrow',flipH:!!o.flipX,flipV:!!o.flipY,connector:['arrow','line'].includes(o.type)}));
+   }else pp.append(native.canvasShape(o,scale));
   }return pp;
+ }
+ async function photoParagraph({items,height}){
+  const p=drawingParagraph(height);
+  for(const {photo,image,caption}of items){
+   const r=await picture(photo.data,image.width,image.height,photo.caption);
+   const extent=r.getElementsByTagNameNS('http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing','extent')[0];
+   const width=Number(extent.getAttribute('cx'))/12700,height=Number(extent.getAttribute('cy'))/12700;
+   const x=image.x+(image.width-width)/2,y=image.y+(image.height-height)/2;
+   p.append(anchorPicture(r,x,y),...native.photoMarks(photo,x,y,width,height));
+   if(caption?.text){
+    const {x,y,width,height,text,fontSize,lineHeight}=caption;
+    p.append(native.nativeShape({name:'作业配图说明',x,y,width,height,text,fontSize,stroke:null,textLayout:{fontFamily:'宋体',lineHeight,leftInset:0,rightInset:0,anchor:'t'}}));
+   }
+  }
+  return p;
  }
  async function logo(t){
   const drawing=desc(t,'drawing')[0];
@@ -221,37 +390,28 @@ async function exportDocx(project,layout,front){
   fillCell(cell(t,3,1),p.station);
   fillCell(cell(t,19,0),p.duration);
   fillCell(cell(t,19,1),p.people);
-  const op=cell(t,3,2);
-  if(window.SOP_IMPORT.active(p)){
+  const op=cell(t,3,2),imported=window.SOP_IMPORT.active(p);
+  if(!imported||p.importedContent?.workbenchWidth){
+   // Account for the reference grid's borders so Word uses the preview's physical text width.
+   const properties=first(op,'tcPr'),margins=el(d,'tcMar');
+   for(const [edge,width]of Object.entries(operationDimensions.operationWordPadding))margins.append(el(d,edge,{w:width,type:'dxa'}));
+   properties.insertBefore(margins,first(properties,'vAlign')||null);
+  }
+  if(imported){
    for(const child of [...op.children])if(child.localName!=='tcPr')child.remove();
    op.append(...importNodes(window.SOP_IMPORT.bodyBlocks(p)));
   }else if(p.steps.trim()||p.requirements.trim()||p.canvas||p.photos.length||p.standardText){
    for(const child of [...op.children])if(child.localName!=='tcPr')child.remove();
    op.append(operationHeading('一、操作步骤：'));
-   for(const line of window.SOP.bodyLines(p,'steps'))op.append(bodyParagraph(d,line,p,'steps'));
+   for(const line of window.SOP.bodyLines(p,'steps'))op.append(bodyParagraph(d,line,p,'steps',nextFitId));
    if(p.canvas)op.append(await canvasParagraph(p.canvas,contentWidth,p.canvasHeightPt));
-   for(let i=0;!p.canvas&&i<p.photos.length;i+=2){
-    const rowPhotos=p.photos.slice(i,i+2),pp=para(d,'',4,true),items=[];
-    const gap=15.75;
-    for(const photo of rowPhotos){
-     if(items.length)pp.append(run(d,'   ',21));
-     const r=await picture(photo.data,(contentWidth-gap)/2,105,photo.caption),extent=r.getElementsByTagNameNS('http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing','extent')[0];
-     items.push({photo,width:Number(extent.getAttribute('cx'))/12700,height:Number(extent.getAttribute('cy'))/12700});
-     pp.append(r);
-    }
-    const total=items.reduce((n,x)=>n+x.width,0)+gap*(items.length-1),maxHeight=Math.max(...items.map(x=>x.height));
-    let left=(contentWidth-total)/2;
-    for(const item of items){pp.append(...native.photoMarks(item.photo,left,maxHeight-item.height,item.width,item.height));left+=item.width+gap;}
-    op.append(pp);
-    if(rowPhotos.some(x=>x.caption))op.append(para(d,rowPhotos.map(x=>x.caption||'').join('　　　　'),17,true));
-   }
+   else if(p.photos.length)for(const row of window.SOP.operationPhotoLayout(p.photos))op.append(await photoParagraph(row));
    op.append(operationHeading('二、工艺技术要求：'));
-   for(const line of window.SOP.bodyLines(p,'requirements'))op.append(bodyParagraph(d,line,p,'requirements'));
+   for(const line of window.SOP.bodyLines(p,'requirements'))op.append(bodyParagraph(d,line,p,'requirements',nextFitId));
    if(p.standardText)op.append(para(d,p.standardText,20));
   }else{
-   const heading=first(op,'p');
-   first(first(heading,'pPr'),'numPr')?.remove();
-   fillParagraph(heading,'一、操作步骤：');
+   for(const paragraph of children(op,'p'))paragraph.remove();
+   op.append(operationHeading('一、操作步骤：',operationText.emptyHeadingGap),operationHeading('二、工艺技术要求：'));
   }
   if(!children(op,'p').length)op.append(para(d,'',2));
   for(let i=0;i<6;i++)for(const [j,key]of materialFields.entries())fillCell(cell(t,4+i,4+j),p.materials[i]?.[key]);
@@ -297,6 +457,11 @@ async function exportDocx(project,layout,front){
   for(const child of node.parentNode.getElementsByTagNameNS('http://schemas.openxmlformats.org/drawingml/2006/picture','cNvPr'))if(child.getAttribute('id')===id)child.setAttribute('id',unique);
   usedDrawingIds.add(unique);
  }
+ const styles=xml(await z.file('word/styles.xml').async('string'));
+ const fullWidthStyle=el(styles,'style',{type:'character',customStyle:1,styleId:operationText.fullWidthStyleId});
+ fullWidthStyle.append(el(styles,'name',{val:operationText.fullWidthStyleName}),el(styles,'semiHidden'));
+ styles.documentElement.append(fullWidthStyle);
+ z.file('word/styles.xml',serialize(styles));
  const documentXML=serialize(d);
  z.file('word/document.xml',documentXML);
  for(let i=1;i<=4;i++){
@@ -316,7 +481,7 @@ async function exportDocx(project,layout,front){
  z.file('word/settings.xml',serialize(settings));
  const embedded=xml('<sop-project xmlns="urn:lenfor:sop:project"/>');
  embedded.documentElement.setAttribute('documentSha256',await hashText(documentXML));
- embedded.documentElement.textContent=base64Utf8(JSON.stringify(project));
+ embedded.documentElement.textContent=base64Utf8(JSON.stringify(window.SOP.projectForStorage(project)));
  z.file('customXml/sop-project.xml',serialize(embedded));
  addRelationship('rIdSopProject','customXml','../customXml/sop-project.xml');
  z.file('word/_rels/document.xml.rels',serialize(rels));
@@ -369,7 +534,8 @@ async function importDocx(buffer){
    if(isReference)n.changeRecords=rows.slice(21,23).map(row=>Object.fromEntries(revisionFields.map((key,i)=>[key,editableText(cells(row)[i])])));
   }
   {const index=rows.findIndex(r=>/编制/.test(txt(r))&&/审核/.test(txt(r))&&/批准/.test(txt(r)));const values=rows[index+(isReference?2:1)],cs=index>=0&&values?cells(values).slice(-4):[];if(cs.length===4){for(const [j,key]of ['author','reviewer','approver'].entries()){const value=txt(cs[j]),date=value.match(/\d{4}[年/.-]\d{1,2}[月/.-]\d{1,2}日?/);n.signoff[key]=value.replace(/\d{4}[年/.-]\d{1,2}[月/.-]\d{1,2}日?/g,'').trim();n.signoff[key+'Date']=date?.[0]||'';}n.signoff.version=txt(cs[3]);}}
-  n.importedContent={blocks:await window.SOP_IMPORT.capture(op,z,relmap,sourceStyles,sourceTheme),signature:window.SOP_IMPORT.signature(n)};
+  const workbenchWidth=desc(op,'rStyle').some(style=>window.SOP_IMPORT.workbenchTracking(style.getAttributeNS(W,'val'),sourceStyles));
+  n.importedContent={blocks:await window.SOP_IMPORT.capture(op,z,relmap,sourceStyles,sourceTheme),signature:window.SOP_IMPORT.signature(n),...(workbenchWidth?{workbenchWidth}:{})};
   p.pages.push(n);
  }
  if(!p.pages.length)throw Error('未识别到兼容格式的工序表。第一版支持与当前参考文件结构一致的表格型 SOP。');Object.assign(p.meta,coverData);p.nativeWord=await window.SOP_IMPORT.resources(z);await ensureOriginalFront(p,z,d,relmap,{styles:sourceStyles,theme:sourceTheme});const result=window.SOP.validate(p);result.nativeWord.projectState=window.SOP_IMPORT.projectState(result);return result;
@@ -407,7 +573,7 @@ function originalFrontBlocks(project,kind){
  const baseline=original.metaBaseline||{},keys={number:'文件编号',bare:'裸机成品料号',packed:'包装成品料号',version:'版本',date:'生效日期',author:'制定',reviewer:'审核',approver:'批准',qualitySigner:'质量会签',productionSigner:'生产会签'},updates=[];
  for(const [key,label]of Object.entries(keys))if(project.meta[key]!==baseline[key])updates.push({label,value:project.meta[key]||''});
  if(project.meta.product!==baseline.product||project.meta.title!==baseline.title)updates.push({label:'文件名称',value:[project.meta.product,project.meta.title].filter(Boolean).join(' ')});
- return original.blocks.map(block=>{const d=xml(block.xml),table=desc(d,'tbl')[0];if(table&&children(table,'tr')[0]&&cells(children(table,'tr')[0]).length===2){const c=cell(table,0,1);centerCell(c,project.frontContent?.coverHeading??txt(c),32);}for(const p of desc(d,'p')){const text=txt(p),normal=text.replace(/\s/g,'');for(const {label,value}of updates){if(!normal.startsWith(label+':')&&!normal.startsWith(label+'：'))continue;const colon=text.search(/[：:]/);if(colon<0)continue;const nodes=children(p,'r').flatMap(r=>children(r,'t')),joined=nodes.map(n=>n.textContent).join(''),start=joined.search(/[：:]/)+1,end=joined.indexOf('签字',start),segment=joined.slice(start,end<0?joined.length:end),lead=segment.match(/^\s*/)[0].length,tail=segment.match(/\s*$/)[0].length,from=start+lead,to=Math.max(from,start+segment.length-tail);let pos=0,inserted=false;for(const n of nodes){const s=n.textContent,next=pos+s.length;if((next>from&&pos<to)||(!inserted&&from===to&&pos<=from&&next>=from)){n.textContent=s.slice(0,Math.max(0,from-pos))+(inserted?'':value)+(next>to?s.slice(Math.max(0,to-pos)):'');n.setAttribute('xml:space','preserve');inserted=true;}pos=next;}break;}}return {...block,xml:serialize(d.documentElement)};});
+ return original.blocks.map(block=>{const d=xml(block.xml),table=desc(d,'tbl')[0];if(table&&children(table,'tr')[0]&&cells(children(table,'tr')[0]).length===2){const c=cell(table,0,1);centerCell(c,project.frontContent?.coverHeading??txt(c),32);}for(const p of desc(d,'p')){const text=txt(p),normal=text.replace(/\s/g,'');for(const {label,value}of updates){if(!normal.startsWith(label+':')&&!normal.startsWith(label+'：'))continue;const split=coverSignerCells(p.parentElement?.parentElement);if(split?.label===label){fillCell(split.name,value);break;}const colon=text.search(/[：:]/);if(colon<0)continue;const nodes=children(p,'r').flatMap(r=>children(r,'t')),joined=nodes.map(n=>n.textContent).join(''),start=joined.search(/[：:]/)+1,end=joined.indexOf('签字',start),segment=joined.slice(start,end<0?joined.length:end),lead=segment.match(/^\s*/)[0].length,tail=segment.match(/\s*$/)[0].length,from=start+lead,to=Math.max(from,start+segment.length-tail);let pos=0,inserted=false;for(const n of nodes){const s=n.textContent,next=pos+s.length;if((next>from&&pos<to)||(!inserted&&from===to&&pos<=from&&next>=from)){n.textContent=s.slice(0,Math.max(0,from-pos))+(inserted?'':value)+(next>to?s.slice(Math.max(0,to-pos)):'');n.setAttribute('xml:space','preserve');inserted=true;}pos=next;}break;}}return {...block,xml:serialize(d.documentElement)};});
 }
 async function refreshOriginalCover(project,kind='cover'){const original=project.originalFront?.[kind];if(!original)return false;const key=JSON.stringify({version:3,meta:project.meta,front:project.frontContent});if(original.previewKey===key)return false;original.previewKey=key;try{const z=new JSZip();for(const [name,data]of Object.entries(project.nativeWord.files))z.file(name,data,{base64:true});const rels=new Map([...xml(await z.file('word/_rels/document.xml.rels').async('string')).documentElement.children].map(n=>[n.getAttribute('Id'),n.getAttribute('Target')])),{styles,theme}=await window.SOP_IMPORT.typographyParts(z),d=xml('<root>'+originalFrontBlocks(project,kind).map(b=>b.xml).join('')+'</root>');original.previewBlocks=await window.SOP_IMPORT.capture(d.documentElement,z,rels,styles,theme);return true;}catch(error){original.previewKey='';return false;}}
 function convertOriginalFlow(project){

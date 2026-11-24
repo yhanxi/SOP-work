@@ -201,6 +201,18 @@ function paragraphProperties(pr){
  }
  return s;
 }
+const workbenchTrackingStyles=new WeakMap();
+function workbenchTracking(id,styles){
+ if(!id)return false;
+ const {fullWidthStyleId,fullWidthStyleName}=window.SOP_TEMPLATE.operationText;
+ if(id===fullWidthStyleId)return true;
+ if(!styles)return false;
+ if(!workbenchTrackingStyles.has(styles)){
+  const ids=wNodes(styles,'style').filter(style=>val(one(style,'name'),'val')===fullWidthStyleName).map(style=>val(style,'styleId'));
+  workbenchTrackingStyles.set(styles,new Set(ids));
+ }
+ return workbenchTrackingStyles.get(styles).has(id);
+}
 function formatting(styles,theme){
  const values=themeValues(theme),defaults=sourceDefaults(styles),lookup=new Map(wNodes(styles,'style').map(style=>[val(style,'styleId'),style]));
  const normal=val(defaultParagraph(styles),'styleId'),language=fontLanguage(defaults.rPr)||'zh-CN';
@@ -226,8 +238,10 @@ function formatting(styles,theme){
    };
   },
   run(node,paragraph){
-   const direct=one(node,'rPr'),inherited=chain(val(one(direct,'rStyle'),'val'));
-   return Object.assign({},paragraph,...inherited.map(s=>runs(one(s,'rPr'))),runs(direct));
+   const direct=one(node,'rPr'),id=val(one(direct,'rStyle'),'val'),inherited=chain(id);
+   const formatting=Object.assign({},paragraph,...inherited.map(s=>runs(one(s,'rPr'))),runs(direct));
+   if(formatting['letter-spacing']&&workbenchTracking(id,styles))formatting['letter-spacing']=parseFloat(formatting['letter-spacing'])*2+'pt';
+   return formatting;
   },
  };
 }
@@ -425,5 +439,5 @@ const pageSignoff=(p,m)=>Object.fromEntries(['author','authorDate','reviewer','r
 const confidentialityLevels=['绝密','机密','一般'];
 function confidentialityLevel(settings){if(confidentialityLevels.includes(settings.confidentialLevel))return settings.confidentialLevel;const text=String(settings.confidential||'').replace(/\s/g,''),checked=text.match(/[☑☒✓✔√](绝密|机密|一般)/),plain=text.match(/^(?:保密等级[：:])?(绝密|机密|一般)$/);return checked?.[1]||plain?.[1]||'';}
 function confidentialityText(settings){const level=confidentialityLevel(settings);return level?'保密等级：'+confidentialityLevels.map(label=>(label===level?'☑':'☐')+label).join('  '):String(settings.confidential||'');}
-window.SOP_IMPORT={confidentialityLevel,confidentialityText,pageSignoff,projectState,signature,active,bodyBlocks,refreshBody,operationLine,capture,typographyParts,resources,exporter,preview,imageIds};
+window.SOP_IMPORT={confidentialityLevel,confidentialityText,pageSignoff,projectState,signature,workbenchTracking,active,bodyBlocks,refreshBody,operationLine,capture,typographyParts,resources,exporter,preview,imageIds};
 })();

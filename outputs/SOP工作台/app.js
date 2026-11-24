@@ -116,12 +116,43 @@ function validate(p){
 function openDb(){return new Promise((resolve,reject)=>{const r=indexedDB.open('sop-studio-new-template-20261030',1);r.onupgradeneeded=()=>r.result.createObjectStore('projects');r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);});}
 function dbRead(key='current'){return new Promise((resolve,reject)=>{const r=db.transaction('projects').objectStore('projects').get(key);r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);});}
 function dbWrite(value){return new Promise((resolve,reject)=>{const t=db.transaction('projects','readwrite');t.objectStore('projects').put(value,'current');t.objectStore('projects').put(projectFiles?.state()||null,'fileBinding');t.oncomplete=resolve;t.onerror=()=>reject(t.error);t.onabort=()=>reject(t.error||Error('自动保存中断'));});}
-function changed(){revision++;document.body.dataset.recovery='pending';projectFiles?.changed();clearTimeout(saveTimer);saveTimer=setTimeout(async()=>{if(!autosaveReady){document.body.dataset.recovery='failed';projectFiles?.status();return;}const current=revision;try{await dbWrite(clone(project));lastSaved=current;document.body.dataset.recovery='saved';}catch(e){document.body.dataset.recovery='failed';toast('本机恢复缓存不可用，请及时点击“保存”写入项目文件。',true);}projectFiles?.status();},400);clearTimeout(refreshTimer);refreshTimer=setTimeout(refresh,220);}
+function changed(){revision++;document.body.dataset.recovery='pending';projectFiles?.changed();clearTimeout(saveTimer);saveTimer=setTimeout(async()=>{if(!autosaveReady){document.body.dataset.recovery='failed';projectFiles?.status();return;}const current=revision;try{await dbWrite(projectForStorage(project));lastSaved=current;document.body.dataset.recovery='saved';}catch(e){document.body.dataset.recovery='failed';toast('本机恢复缓存不可用，请及时点击“保存”写入项目文件。',true);}projectFiles?.status();},400);clearTimeout(refreshTimer);refreshTimer=setTimeout(refresh,220);}
 function download(blob,name){const u=URL.createObjectURL(blob),a=document.createElement('a');a.href=u;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(u),30000);}
 function filename(){return (project.meta.product+'_'+project.meta.title+'_'+project.meta.version).replace(/[\\/:*?"<>|]/g,'_');}
 function drawMarks(ctx,marks,w,h){for(const m of marks||[]){const x=m.x*w,y=m.y*h,x2=m.x2*w,y2=m.y2*h;ctx.strokeStyle=m.color||'#e22d32';ctx.fillStyle=m.color||'#e22d32';ctx.lineWidth=Math.max(2,w/260);ctx.lineCap='round';if(m.type==='rect'){ctx.strokeRect(Math.min(x,x2),Math.min(y,y2),Math.abs(x2-x),Math.abs(y2-y));}else if(m.type==='line'){ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(x2,y2);ctx.stroke();}else if(m.type==='arrow'){ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(x2,y2);ctx.stroke();const a=Math.atan2(y2-y,x2-x),size=Math.max(9,w/35);ctx.beginPath();ctx.moveTo(x2,y2);ctx.lineTo(x2-size*Math.cos(a-.48),y2-size*Math.sin(a-.48));ctx.lineTo(x2-size*Math.cos(a+.48),y2-size*Math.sin(a+.48));ctx.closePath();ctx.fill();}else if(m.type==='circle'){ctx.beginPath();ctx.ellipse((x+x2)/2,(y+y2)/2,Math.max(1,Math.abs(x2-x)/2),Math.max(1,Math.abs(y2-y)/2),0,0,Math.PI*2);ctx.stroke();}else if(m.type==='text'){const size=w*(Number(m.fontSize)||1/28);ctx.font=`600 ${size}px "Microsoft YaHei",sans-serif`;const t=String(m.text||'标注');const tw=ctx.measureText(t).width;if(m.background!=='transparent'){ctx.fillStyle=m.background||'#fff7b7';const pad=w/200;ctx.fillRect(x-pad,y-size,tw+pad*2,size*1.4);}ctx.fillStyle=m.color||'#e22d32';ctx.fillText(t,x,y);}}}
 async function loadImage(data){return new Promise((resolve,reject)=>{const im=new Image();im.onload=()=>resolve(im);im.onerror=()=>reject(Error('无法读取图片，请使用 PNG、JPEG 或 WebP。'));im.src=data;});}
-async function annotated(photo){const key=photo.data+'|'+JSON.stringify(photo.marks||[]);if(imageCache.has(key))return imageCache.get(key);if(!photo.marks?.length)return photo.data;const im=await loadImage(photo.data),c=document.createElement('canvas');const scale=Math.max(1,1600/im.naturalWidth);c.width=Math.round(im.naturalWidth*scale);c.height=Math.round(im.naturalHeight*scale);const ctx=c.getContext('2d');ctx.drawImage(im,0,0,c.width,c.height);drawMarks(ctx,photo.marks,c.width,c.height);const result=c.toDataURL('image/png');imageCache.set(key,result);if(imageCache.size>150)imageCache.delete(imageCache.keys().next().value);return result;}
+async function annotated(photo){
+ if(!photo.marks?.length)return photo.data;
+ const key=photo.data+'|'+JSON.stringify(photo.marks);
+ if(imageCache.has(key))return imageCache.get(key);
+ const im=await loadImage(photo.data),canvas=document.createElement('canvas');
+ const scale=Math.min(1,window.SOP_OBJECTS.photoMaxEdge/Math.max(im.naturalWidth,im.naturalHeight));
+ canvas.width=Math.max(1,Math.round(im.naturalWidth*scale));
+ canvas.height=Math.max(1,Math.round(im.naturalHeight*scale));
+ const context=canvas.getContext('2d');
+ if(!context)throw Error('无法显示图片标注。');
+ context.drawImage(im,0,0,canvas.width,canvas.height);
+ drawMarks(context,photo.marks,canvas.width,canvas.height);
+ const result=window.SOP_OBJECTS.encodePhotoCanvas(canvas,photo.data);
+ imageCache.set(key,result);
+ if(imageCache.size>150)imageCache.delete(imageCache.keys().next().value);
+ return result;
+}
+function projectForStorage(source){
+ return {...source,pages:source.pages.map(page=>{
+  const saved={...page,photos:page.photos.map(({rendered,...photo})=>rendered&&rendered!==photo.data&&!photo.marks?.length?{...photo,rendered}:photo)};
+  for(const field of ['canvas','canvasDraft']){
+   const model=page[field];
+   if(!model?.objects?.some(object=>object.type==='photo'&&object.rendered===object.data))continue;
+   saved[field]={...model,objects:model.objects.map(object=>{
+    if(object.type!=='photo'||object.rendered!==object.data)return object;
+    const {rendered,...photo}=object;
+    return photo;
+   })};
+  }
+  return saved;
+ })};
+}
 function canvasText(p,key){
  if(A.layout!=='wide-v2'&&key==='requirements'&&!p[key].trim())return '';
  const heading=key==='steps'?'一、操作步骤：':'二、工艺技术要求：';
@@ -131,8 +162,8 @@ function canvasText(p,key){
 }
 function canvasSpace(p,model=p.canvas){
  const host=$('#measureRoot'),wide=A.layout==='wide-v2',mm=25.4/1440;
- const {operationWidthTwips,operationHeightTwips,operationSidePaddingTwips}=T.dimensions;
- const widthMm=wide?operationWidthTwips*mm:273.05*.474,heightMm=wide?operationHeightTwips*mm:122;
+ const {operationContentWidthTwips,operationHeightTwips,operationSidePaddingTwips}=T.dimensions;
+ const widthMm=wide?(operationContentWidthTwips+2*operationSidePaddingTwips)*mm:273.05*.474,heightMm=wide?operationHeightTwips*mm:122;
  const sidePad=wide?operationSidePaddingTwips*mm:2,verticalPad=wide?0:2;
  host.innerHTML='<div class="op-cell'+(wide?' reference-measure':'')+'" style="display:flow-root;width:'+widthMm+'mm;padding:'+verticalPad+'mm '+sidePad+'mm"><div>'+canvasText(p,'steps')+canvasText(p,'requirements')+'</div></div>';
  const box=host.firstElementChild,inner=box.firstElementChild,style=getComputedStyle(box);
@@ -145,14 +176,47 @@ function operationPhotos(photos){
  const tags=photo=>'<img src="'+esc(photo.rendered||photo.data)+'" alt="'+esc(photo.caption||'作业图片')+'"><figcaption>'+esc(photo.caption||'')+'</figcaption>';
  if(!photos.length)return '';
  if(A.layout!=='wide-v2')return '<div class="op-images">'+photos.map(photo=>'<figure class="op-image">'+tags(photo)+'</figure>').join('')+'</div>';
- const {operationWidthTwips,operationSidePaddingTwips}=T.dimensions;
- const width=((operationWidthTwips-2*operationSidePaddingTwips)/20-15.75)/2;
+ const width=(T.dimensions.operationContentWidthTwips/20-15.75)/2;
  const figure=(photo,index)=>{
   const originalWidth=Number(photo.width)||1,originalHeight=Number(photo.height)||1;
   const ratio=Math.min(width/originalWidth,105/originalHeight);
   return '<figure class="op-image" data-print-part="photos.'+index+'" data-print-label="作业配图 '+(index+1)+'" style="width:'+(originalWidth*ratio)+'pt;--photo-height:'+(originalHeight*ratio)+'pt">'+tags(photo)+'</figure>';
  };
  return Array.from({length:Math.ceil(photos.length/2)},(_,i)=>'<div class="reference-photo-row">'+photos.slice(i*2,i*2+2).map((photo,j)=>figure(photo,i*2+j)).join('')+'</div>').join('');
+}
+function operationPhotoLayout(photos){
+ const host=$('#measureRoot'),width=T.dimensions.operationContentWidthTwips/20;
+ host.innerHTML='<div class="op-cell reference-measure" style="display:flow-root;padding:0;width:'+width+'pt">'+operationPhotos(photos)+'</div>';
+ try{
+  let index=0;
+  return [...host.querySelectorAll('.reference-photo-row')].map(row=>{
+   const rowBox=row.getBoundingClientRect(), style=getComputedStyle(row),pt=px=>px*.75;
+   const rect=(element)=>{
+    const box=element.getBoundingClientRect();
+    return {x:pt(box.left-rowBox.left),y:pt(box.top-rowBox.top),width:pt(box.width),height:pt(box.height)};
+   };
+   const items=[...row.children].map(figure=>{
+    const caption=figure.querySelector('figcaption'),captionBox=rect(caption),photo=photos[index++];
+    const image=rect(figure.querySelector('img'));
+    if(!captionBox.height)return {photo,image};
+    const {fontSize,lineHeight}=getComputedStyle(caption),node=caption.firstChild,range=document.createRange(),lines=[];
+    let start=0,lineTop=null;
+    for(let offset=0;offset<node.length;){
+     const next=offset+(node.data.codePointAt(offset)>0xffff?2:1);
+     range.setStart(node,offset);range.setEnd(node,next);
+     const box=range.getBoundingClientRect();
+     if(box.width){
+      if(lineTop!==null&&box.top!==lineTop){lines.push(node.data.slice(start,offset).trim());start=offset;}
+      lineTop=box.top;
+     }
+     offset=next;
+    }
+    lines.push(node.data.slice(start).trim());
+    return {photo,image,caption:{...captionBox,text:lines.join('\n'),fontSize:pt(parseFloat(fontSize)),lineHeight:pt(parseFloat(lineHeight))}};
+   });
+   return {items,height:pt(rowBox.height+parseFloat(style.marginBottom))};
+  });
+ }finally{host.replaceChildren();}
 }
 function opHtml(p){
  if(p.canvas){
@@ -604,7 +668,7 @@ function renderEditor(){if(String(selected).startsWith('front:'))return renderFr
   },{snapshotOnEdit:true});
   $$('[data-meta]').forEach(el=>bindInput(el,v=>p[el.dataset.meta]=v));for(const [id,k] of [['stepsInput','steps'],['requirementsInput','requirements']])bindBodyText($('#'+id),p,k);
   if(window.SOP_IMPORT?.active(p)){e.insertAdjacentHTML('afterbegin','<div class="notice">当前页保留原稿图文及可编辑标注。未改动项目导出 Word 时保留原文档分页；段内文字可沿用原 Word 格式。增删段落、调整样式或修改配图后会重新编排，可用撤销恢复。浏览器按工序表格预览，物理页数请在 Word/WPS 中核对。</div>');}
-  e.insertAdjacentHTML('afterbegin','<div class="canvas-entry"><strong>图文页面画布</strong><p>照片、文字框与箭头独立摆放，支持照片外留白。</p><button id="editPageCanvas" class="primary">'+(p.canvas?'编辑页面画布':'建立页面画布')+'</button></div>');$('#editPageCanvas').disabled=p.fixed.includes('photos');$('#editPageCanvas').onclick=()=>{if(p.importedContent&&!p.canvas)toast('画布仅载入照片素材；原生标注/复杂图文无法自动迁移。保存后使用重排副本，原稿仍保留，可导出原始 Word。',true);const model=p.canvas||p.canvasDraft||window.SOP_OBJECTS.fromPhotos(p.photos),space=canvasSpace(p,model);if(space.textOverflow)return toast('文字已占满内容框，请先手动调整文字、字号或字间距，留出画布空间。',true);window.SOP_OBJECTS.open(model,{availableHeight:space.height,title:'工序图文画布',onSave:value=>{snapshot();p.canvas=value;p.fitSinglePage=false;renderEditor();changed();refresh();}});};if(p.canvas){e.insertAdjacentHTML('afterbegin','<div class="notice">本页使用独立对象画布。下方显示画布中的照片，可进入画布编辑。<button id="restorePageMaterials">返回原图文排版</button></div>');$('#restorePageMaterials').onclick=()=>{snapshot();p.canvasDraft=p.canvas;delete p.canvas;renderEditor();changed();refresh();};}
+  e.insertAdjacentHTML('afterbegin','<div class="canvas-entry"><strong>图文页面画布</strong><p>照片、文字框与箭头独立摆放，支持照片外留白。</p><button id="editPageCanvas" class="primary">'+(p.canvas?'编辑页面画布':'建立页面画布')+'</button></div>');$('#editPageCanvas').disabled=p.fixed.includes('photos');$('#editPageCanvas').onclick=()=>void openPageCanvas(p);if(p.canvas){e.insertAdjacentHTML('afterbegin','<div class="notice">本页使用独立对象画布。下方显示画布中的照片，可进入画布编辑。<button id="restorePageMaterials">返回原图文排版</button></div>');$('#restorePageMaterials').onclick=()=>{snapshot();p.canvasDraft=p.canvas;delete p.canvas;renderEditor();changed();refresh();};}
   if(p.importedContent&&!window.SOP_IMPORT.active(p))e.insertAdjacentHTML('afterbegin','<div class="notice">当前页为重排副本。无法直接转换的原图文/标注仍保存在项目的原稿中，可撤销或导出原始 Word 查阅。</div>');renderPhotos();if($('#uploadBtn')){
    if(p.canvas)$('#uploadBtn').onclick=()=>{$('#editPageCanvas').click();document.querySelector('.object-dialog[open] [data-action="upload"]')?.click();};
    else $('#uploadBtn').onclick=()=>$('#photoFile').click();
@@ -650,6 +714,38 @@ function renderEditor(){if(String(selected).startsWith('front:'))return renderFr
  if(editNumber)editNumber.onclick=editProcessNumber;
  refreshProcessNumberWarning();
 }
+async function openPageCanvas(p){
+ const button=$('#editPageCanvas'),source=p.canvas||p.canvasDraft;
+ if(!button||button.disabled)return;
+ if(p.importedContent&&!p.canvas)toast('画布仅载入照片素材；原生标注/复杂图文无法自动迁移。保存后使用重排副本，原稿仍保留，可导出原始 Word。',true);
+ if(canvasSpace(p,source).textOverflow)return toast('文字已占满内容框，请先手动调整文字、字号或字间距，留出画布空间。',true);
+ button.disabled=true;
+ try{
+  let model=source,compressed=0;
+  if(!model){
+   const originals=p.photos.slice(),photos=[];
+   for(const photo of originals){
+    const image=await window.SOP_OBJECTS.readPhoto(photo.data);
+    compressed+=Number(image.data!==photo.data);
+    photos.push({...photo,data:image.data,width:image.sourceWidth,height:image.sourceHeight});
+   }
+   if(page()!==p||p.canvas||p.canvasDraft||p.fixed.includes('photos')||originals.length!==p.photos.length||
+    originals.some((photo,i)=>photo!==p.photos[i]))return;
+   model=window.SOP_OBJECTS.fromPhotos(photos);
+  }
+  const space=canvasSpace(p,model);
+  if(space.textOverflow)return toast('文字已占满内容框，请先调整文字，留出画布空间。',true);
+  window.SOP_OBJECTS.open(model,{availableHeight:space.height,title:'工序图文画布',onSave:value=>{
+   snapshot();
+   p.canvas=value;
+   if(source&&p.canvasDraft===source)delete p.canvasDraft;
+   p.fitSinglePage=false;
+   renderEditor();changed();refresh();
+   if(compressed)toast('已压缩 '+compressed+' 张转入画布的照片，普通图文里的原配图仍可恢复。');
+  }});
+ }catch(error){if(page()===p)toast('画布图片加载失败：'+error.message,true);}
+ finally{if(button.isConnected)button.disabled=p.fixed.includes('photos');}
+}
 function currentPhotos(p){return p.canvas?p.canvas.objects.filter(o=>o.type==='photo'):p.photos;}
 function updateCanvasPhoto(o,photo,width,height){
  const ratio=width/height;
@@ -676,9 +772,25 @@ function renderPhotos(){
  const note=g.parentElement.querySelector('.field-note');
  if(p.canvas&&note)note.textContent='可在这里编辑画布中的图片，也可以在画布中移动、缩放或粘贴新图片。';
 }
-async function filePhoto(file){if(file.size>35*1024*1024)throw Error('单张图片请控制在 35MB 以内。');const data=await new Promise((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(r.result);r.onerror=()=>reject(Error('读取图片失败'));r.readAsDataURL(file);});const im=await loadImage(data);const scale=Math.min(1,1800/Math.max(im.width,im.height)),c=document.createElement('canvas');c.width=Math.round(im.width*scale);c.height=Math.round(im.height*scale);c.getContext('2d').drawImage(im,0,0,c.width,c.height);return {id:uid(),data:c.toDataURL('image/jpeg',.88),caption:file.name.replace(/\.[^.]+$/,''),width:c.width,height:c.height,marks:[]};}
-async function addPhotos(files){const p=page();if(!p)return toast('请先新增一道工序。');if(p.fixed.includes('photos'))return toast('请先解锁固定配图。');snapshot();try{for(const f of files){if(f.type.startsWith('image/'))p.photos.push(await filePhoto(f));}renderEditor();changed();refresh();toast('照片已加入工序，页码已重新计算。');}catch(e){toast(e.message,true);}}
-async function prepareImages(candidate=project){if(!candidate.nativeWord&&candidate.frontContent?.flowManual&&!candidate.frontContent?.flowGraph){const c=candidate.frontContent||{},source=c.flowManual?String(c.flowText||'').split('\n').filter(Boolean).map((name,i)=>({name,processId:String(i)})):candidate.pages;if(source.length<=24)candidate.frontContent={...c,flowGraph:window.SOP_OBJECTS.fromProcesses(source),flowMode:'editable'};}if(window.SOP_WORD?.ensureOriginalFront)await window.SOP_WORD.ensureOriginalFront(candidate);await window.SOP_IMPORT.refreshBody(candidate);for(const p of candidate.pages)for(const ph of p.photos){if(!ph.width||!ph.height){const im=await loadImage(ph.data);ph.width=im.naturalWidth;ph.height=im.naturalHeight;}ph.rendered=await annotated(ph);}}
+async function filePhoto(file){
+ const {data,width,height}=await window.SOP_OBJECTS.readPhoto(file,{allowOtherFormats:true});
+ return {id:uid(),data,width,height,caption:file.name.replace(/\.[^.]+$/,''),marks:[]};
+}
+async function addPhotos(files){
+ const p=page();
+ if(!p)return toast('请先新增一道工序。');
+ if(p.fixed.includes('photos'))return toast('请先解锁固定配图。');
+ try{
+  const photos=[];
+  for(const file of files)if(file.type.startsWith('image/'))photos.push(await filePhoto(file));
+  if(!photos.length||page()!==p||p.canvas||p.fixed.includes('photos'))return;
+  snapshot();
+  p.photos.push(...photos);
+  renderEditor();changed();refresh();
+  toast('照片已加入工序，页码已重新计算。');
+ }catch(error){toast(error.message,true);}
+}
+async function prepareImages(candidate=project){if(!candidate.nativeWord&&candidate.frontContent?.flowManual&&!candidate.frontContent?.flowGraph){const c=candidate.frontContent||{},source=c.flowManual?String(c.flowText||'').split('\n').filter(Boolean).map((name,i)=>({name,processId:String(i)})):candidate.pages;if(source.length<=24)candidate.frontContent={...c,flowGraph:window.SOP_OBJECTS.fromProcesses(source),flowMode:'editable'};}if(window.SOP_WORD?.ensureOriginalFront)await window.SOP_WORD.ensureOriginalFront(candidate);await window.SOP_IMPORT.refreshBody(candidate);for(const p of candidate.pages)for(const ph of p.photos){if(!ph.width||!ph.height){const im=await loadImage(ph.data);ph.width=im.naturalWidth;ph.height=im.naturalHeight;}if(ph.marks?.length)ph.rendered=await annotated(ph);else if(ph.rendered===ph.data)delete ph.rendered;}}
 function showForm(title,html,apply){$('#dialogTitle').textContent=title;$('#dialogBody').innerHTML=html;$('#dialogApply').hidden=!apply;$('#dialogApply').textContent='保存';$('#dialogApply').onclick=()=>{try{apply?.();$('#formDialog').close();}catch(e){toast(e.message,true);}};$('#formDialog').showModal();}
 function editMetadata(){const fields=coverMetaFields;showForm('文档信息',`<div class="notice">这些信息只填写一次，所有页面同步更新。公司名称和 Logo 可在“固定格式”中修改。</div><div class="form-grid">${fields.map(([k,l])=>`<label><span>${l}</span><input data-docmeta="${k}" value="${esc(project.meta[k])}"></label>`).join('')}</div><div class="section-gap"><div class="field-top"><strong>本次修改履历</strong></div><input id="historySummary" placeholder="可选：填写本次修改内容，保存后加入修改履历"></div>`,()=>{const summary=$('#historySummary').value.trim();if(summary&&project.history.length>=T.historyRows)throw Error('当前修改履历页最多 '+T.historyRows+' 条，请先在项目中归档旧记录。');snapshot();$$('[data-docmeta]').forEach(el=>project.meta[el.dataset.docmeta]=el.value);if(summary){project.history.push({date:project.meta.date||new Date().toLocaleDateString('sv-SE'),number:project.meta.number,version:project.meta.version,summary,author:project.meta.author,reviewer:project.meta.reviewer,approver:project.meta.approver});}changed();refresh();});}
 function editSettings(){const s=project.settings,reference=window.SOP_REFERENCE?.defaults;let pendingLogo=s.logo||'';
@@ -785,7 +897,7 @@ async function printPdf(){
  }catch(error){toast('PDF 导出失败：'+error.message,true);}
  finally{button.disabled=false;}
 }
-async function flushSave(){clearTimeout(saveTimer);if(!autosaveReady)throw Error('本机恢复缓存不可用，请点击“保存”写入项目文件。');await dbWrite(clone(project));lastSaved=revision;}
+async function flushSave(){clearTimeout(saveTimer);if(!autosaveReady)throw Error('本机恢复缓存不可用，请点击“保存”写入项目文件。');await dbWrite(projectForStorage(project));lastSaved=revision;}
 if(window.sopDesktop){$('#printBtn').textContent='保存 PDF';window.sopDesktop.onBeforeClose(()=>projectFiles.beforeClose());}
 function renderPresets(){for(const [hostId,input,label,isBackground]of [['textColorPresets','annotationColor','文字 / 线条',false],['backgroundPresets','annotationBackground','文字背景',true]]){SOP_COLORS.mount($('#'+hostId),{value:isBackground&&$('#annotationTransparent').checked?'transparent':$('#'+input).value,label,transparent:isBackground,onChange:color=>{if(color!=='transparent')$('#'+input).value=color;if(isBackground)$('#annotationTransparent').checked=color==='transparent';renderPresets();}});}}
 
@@ -802,15 +914,67 @@ async function openPhoto(id){
 }
 function renderCanvas(){if(!photoEdit)return;const c=$('#annotationCanvas'),im=photoEdit.im,scale=Math.min(1,940/im.width,510/im.height);const pixelRatio=Math.max(2,window.devicePixelRatio||1);c.width=Math.round(im.width*scale*pixelRatio);c.height=Math.round(im.height*scale*pixelRatio);c.style.width=Math.round(im.width*scale)+'px';const ctx=c.getContext('2d');ctx.drawImage(im,0,0,c.width,c.height);drawMarks(ctx,photoEdit.photo.marks,c.width,c.height);if(photoEdit.drag&&photoEdit.tool!=='crop')drawMarks(ctx,[photoEdit.drag],c.width,c.height);const r=photoEdit.crop||(photoEdit.tool==='crop'?photoEdit.drag:null);if(r){ctx.strokeStyle='#0c78d4';ctx.lineWidth=2;ctx.setLineDash([6,5]);ctx.strokeRect(r.x*c.width,r.y*c.height,(r.x2-r.x)*c.width,(r.y2-r.y)*c.height);ctx.setLineDash([]);}$('#cropHint').textContent=photoEdit.tool==='crop'?'拖动选择范围，再点击“应用裁剪”。':'';}
 const point=e=>{const r=$('#annotationCanvas').getBoundingClientRect();return {x:Math.max(0,Math.min(1,(e.clientX-r.left)/r.width)),y:Math.max(0,Math.min(1,(e.clientY-r.top)/r.height))};};
-$('#annotationCanvas').onpointerdown=e=>{if(!photoEdit)return;const p=point(e),m={type:photoEdit.tool,...p,x2:p.x,y2:p.y,color:$('#annotationColor').value,text:$('#annotationText').value,background:$('#annotationTransparent').checked?'transparent':$('#annotationBackground').value,fontSize:Number($('#annotationSize').value)};if(photoEdit.tool==='text'){photoEdit.photo.marks.push(m);renderCanvas();return;}photoEdit.drag=m;e.currentTarget.setPointerCapture(e.pointerId);};
+$('#annotationCanvas').onpointerdown=e=>{if(!photoEdit||photoEdit.transforming)return;const p=point(e),m={type:photoEdit.tool,...p,x2:p.x,y2:p.y,color:$('#annotationColor').value,text:$('#annotationText').value,background:$('#annotationTransparent').checked?'transparent':$('#annotationBackground').value,fontSize:Number($('#annotationSize').value)};if(photoEdit.tool==='text'){photoEdit.photo.marks.push(m);renderCanvas();return;}photoEdit.drag=m;e.currentTarget.setPointerCapture(e.pointerId);};
 $('#annotationCanvas').onpointermove=e=>{if(!photoEdit?.drag)return;const p=point(e);photoEdit.drag.x2=p.x;photoEdit.drag.y2=p.y;renderCanvas();};
 $('#annotationCanvas').onpointerup=()=>{if(!photoEdit?.drag)return;const d=photoEdit.drag;if(Math.abs(d.x-d.x2)+Math.abs(d.y-d.y2)>.015){if(photoEdit.tool==='crop')photoEdit.crop=d;else photoEdit.photo.marks.push(d);}photoEdit.drag=null;renderCanvas();};
-$$('[data-tool]').forEach(b=>b.onclick=()=>{photoEdit.tool=b.dataset.tool;photoEdit.drag=null;$$('[data-tool]').forEach(x=>x.classList.toggle('active',x===b));renderCanvas();});$('#markUndo').onclick=()=>{photoEdit?.photo.marks.pop();renderCanvas();};
-$('#rotatePhoto').onclick=async()=>{if(!photoEdit)return;const im=photoEdit.im,c=document.createElement('canvas');c.width=im.height;c.height=im.width;const ctx=c.getContext('2d');ctx.translate(c.width,0);ctx.rotate(Math.PI/2);ctx.drawImage(im,0,0);for(const m of photoEdit.photo.marks){[m.x,m.y]=[1-m.y,m.x];[m.x2,m.y2]=[1-m.y2,m.x2];}photoEdit.photo.data=c.toDataURL('image/jpeg',.92);photoEdit.im=await loadImage(photoEdit.photo.data);photoEdit.crop=null;renderCanvas();};
-$('#applyCrop').onclick=async()=>{if(!photoEdit?.crop)return toast('请先拖动选择裁剪范围。');const r=photoEdit.crop,x=Math.min(r.x,r.x2),y=Math.min(r.y,r.y2),w=Math.abs(r.x2-r.x),h=Math.abs(r.y2-r.y);if(w<.02||h<.02)return;const im=photoEdit.im,c=document.createElement('canvas');c.width=Math.max(1,Math.round(im.width*w));c.height=Math.max(1,Math.round(im.height*h));c.getContext('2d').drawImage(im,x*im.width,y*im.height,c.width,c.height,0,0,c.width,c.height);for(const m of photoEdit.photo.marks){m.x=(m.x-x)/w;m.y=(m.y-y)/h;m.x2=(m.x2-x)/w;m.y2=(m.y2-y)/h;}photoEdit.photo.marks=photoEdit.photo.marks.filter(m=>m.x>=0&&m.x<=1&&m.y>=0&&m.y<=1);photoEdit.photo.data=c.toDataURL('image/jpeg',.92);photoEdit.im=await loadImage(photoEdit.photo.data);photoEdit.crop=null;renderCanvas();};
+$$('[data-tool]').forEach(b=>b.onclick=()=>{photoEdit.tool=b.dataset.tool;photoEdit.drag=null;$$('[data-tool]').forEach(x=>x.classList.toggle('active',x===b));renderCanvas();});$('#markUndo').onclick=()=>{if(!photoEdit||photoEdit.transforming)return;photoEdit.photo.marks.pop();renderCanvas();};
+async function transformPhoto(paint,remapMarks){
+ const edit=photoEdit;
+ if(!edit||edit.transforming)return;
+ edit.transforming=true;
+ try{
+  const canvas=document.createElement('canvas');
+  paint(canvas,edit.im);
+  const data=window.SOP_OBJECTS.encodePhotoCanvas(canvas,edit.photo.data),image=await loadImage(data);
+  if(photoEdit!==edit)return;
+  edit.photo.marks=remapMarks(clone(edit.photo.marks));
+  edit.photo.data=data;
+  edit.photo.width=image.naturalWidth;
+  edit.photo.height=image.naturalHeight;
+  edit.im=image;
+  edit.crop=null;
+  renderCanvas();
+ }catch(error){
+  if(photoEdit===edit)toast('图片处理失败：'+error.message,true);
+ }finally{edit.transforming=false;}
+}
+$('#rotatePhoto').onclick=()=>transformPhoto((canvas,image)=>{
+ canvas.width=image.naturalHeight;
+ canvas.height=image.naturalWidth;
+ const context=canvas.getContext('2d');
+ context.translate(canvas.width,0);
+ context.rotate(Math.PI/2);
+ context.drawImage(image,0,0);
+},marks=>{
+ for(const mark of marks){
+  [mark.x,mark.y]=[1-mark.y,mark.x];
+  [mark.x2,mark.y2]=[1-mark.y2,mark.x2];
+ }
+ return marks;
+});
+$('#applyCrop').onclick=()=>{
+ if(!photoEdit?.crop)return toast('请先拖动选择裁剪范围。');
+ const crop=photoEdit.crop,x=Math.min(crop.x,crop.x2),y=Math.min(crop.y,crop.y2);
+ const width=Math.abs(crop.x2-crop.x),height=Math.abs(crop.y2-crop.y);
+ if(width<.02||height<.02)return;
+ return transformPhoto((canvas,image)=>{
+  const w=image.naturalWidth*width,h=image.naturalHeight*height;
+  canvas.width=Math.max(1,Math.round(w));
+  canvas.height=Math.max(1,Math.round(h));
+  canvas.getContext('2d').drawImage(image,x*image.naturalWidth,y*image.naturalHeight,w,h,0,0,canvas.width,canvas.height);
+ },marks=>{
+  for(const mark of marks){
+   mark.x=(mark.x-x)/width;
+   mark.y=(mark.y-y)/height;
+   mark.x2=(mark.x2-x)/width;
+   mark.y2=(mark.y2-y)/height;
+  }
+  return marks.filter(mark=>mark.x>=0&&mark.x<=1&&mark.y>=0&&mark.y<=1);
+ });
+};
 $('#savePhoto').onclick=async()=>{
  const edit=photoEdit;
- if(!edit)return;
+ if(!edit||edit.transforming)return;
  try{
   edit.photo.rendered=await annotated(edit.photo);
   const p=page();
@@ -833,7 +997,13 @@ if(A.layout==='wide-v2')document.body.classList.add('template-v2');$('#brandLogo
   if(p!==target.page||p.canvas!==target.canvas||p.fixed.includes('photos'))return;
   const old=currentPhotos(p).find(item=>item.id===target.id);
   if(!old)return;
-  snapshot();ph.id=old.id;ph.caption=old.caption;
+  ph.id=old.id;ph.caption=old.caption;
+  if(target.canvas&&old.marks?.length){
+   ph.marks=clone(old.marks);
+   ph.rendered=await annotated(ph);
+  }
+  if(page()!==p||p.canvas!==target.canvas||p.fixed.includes('photos')||!currentPhotos(p).includes(old))return;
+  snapshot();
   if(p.canvas)updateCanvasPhoto(old,ph,ph.width,ph.height);
   else p.photos[p.photos.indexOf(old)]=ph;
   renderPhotos();changed();refresh();
@@ -871,8 +1041,8 @@ $('#docxBtn').onclick=async()=>{
  }catch(error){toast('导出失败：'+error.message,true);}
  finally{button.disabled=false;button.textContent='导出 Word';}
 };
-window.SOP={validateProjectedPages,canvasSpace,textStyle,bodyLines,snapshot,changed,renderEditor,moveDocumentPage,orderedPages,moveRenderedPage,get project(){return project;},get layout(){return layout;},get front(){return front;},uid,clone,esc,blankPage,validate,annotated,prepareImages,recalc,refresh,operationPaper,frontPaper,flowImage,toast,download,filename,replaceProject(p){snapshot();project=validate(p);selected=p.pages[0]?.id;renderEditor();changed();refresh();},setSelected(id){selected=id;renderEditor();refresh();}};
-projectFiles=window.SOP_FILES.create({getProject:()=>project,filename,toast,download,stateText:p=>window.SOP_IMPORT.projectState(p),recover:flushSave,applyProject:async(p,commit)=>{const candidate=validate(p);await prepareImages(candidate);await commit();clearTimeout(saveTimer);project=candidate;undo=[];selected=project.pages[0]?.id;renderEditor();changed();refresh();}});
+window.SOP={projectForStorage,validateProjectedPages,canvasSpace,operationPhotoLayout,textStyle,bodyLines,snapshot,changed,renderEditor,moveDocumentPage,orderedPages,moveRenderedPage,get project(){return project;},get layout(){return layout;},get front(){return front;},uid,clone,esc,blankPage,validate,annotated,prepareImages,recalc,refresh,operationPaper,frontPaper,flowImage,toast,download,filename,replaceProject(p){snapshot();project=validate(p);selected=p.pages[0]?.id;renderEditor();changed();refresh();},setSelected(id){selected=id;renderEditor();refresh();}};
+projectFiles=window.SOP_FILES.create({getProject:()=>projectForStorage(project),filename,toast,download,stateText:p=>window.SOP_IMPORT.projectState(p),recover:flushSave,applyProject:async(p,commit)=>{const candidate=validate(p);await prepareImages(candidate);await commit();clearTimeout(saveTimer);project=candidate;undo=[];selected=project.pages[0]?.id;renderEditor();changed();refresh();}});
 document.addEventListener('keydown',event=>{if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='s'){event.preventDefault();projectFiles.save(event.shiftKey);}});if(!window.sopDesktop){window.addEventListener('beforeunload',event=>projectFiles.beforeUnload(event));}
 (async()=>{let saved,meta;try{db=await openDb();saved=await dbRead();if(saved){project=validate(saved);selected=project.pages[0]?.id;}meta=await dbRead('fileBinding');autosaveReady=true;document.body.dataset.recovery='saved';}catch(e){document.body.dataset.recovery='failed';}await prepareImages();renderEditor();refresh();await projectFiles.restore(meta,!!saved);})();
 })();
