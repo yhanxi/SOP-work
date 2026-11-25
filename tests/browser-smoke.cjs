@@ -32,14 +32,23 @@ const root=path.resolve(__dirname,'..');
     ]);
     return {values,tabs,rules};
    });
+   const roundtrip=await SOP_WORD.importDocx(await blob.arrayBuffer());
+   const retained=[roundtrip.meta.productionSignature,roundtrip.meta.authorSignature];
    const read=async()=>SOP_WORD.importDocx(await zip.generateAsync({type:'arraybuffer'}));
    const serialize=()=>zip.file('word/document.xml',new XMLSerializer().serializeToString(xml));
-   [...rows[0].children].filter(r=>r.localName==='r'&&find(r,'tab'))[0].getElementsByTagNameNS(w,'t')[0].textContent='Word外部改名';
+   const tabFields=row=>[...row.children].filter(r=>r.localName==='r'&&find(r,'tab'));
+   tabFields(rows[0])[0].getElementsByTagNameNS(w,'t')[0].textContent='Word外部改名';
+   tabFields(rows[2])[2].getElementsByTagNameNS(w,'t')[0].textContent='已签字';
+   tabFields(rows[4])[2].getElementsByTagNameNS(w,'t')[0].textContent='签名乙';
    serialize();
    const imported=await read();
    const savedFields=[imported.meta.approver,imported.meta.qualitySigner,imported.meta.productionSignature,imported.meta.reviewer,imported.meta.authorSignature];
    imported.meta.qualitySigner='会签补录';
    const original=SOP_WORD.originalFrontBlocks(imported,'cover').map(block=>block.xml).join('');
+   const originalZip=await JSZip.loadAsync(await (await SOP_WORD.exportOriginal(imported)).arrayBuffer());
+   const sourceXml=await originalZip.file('word/document.xml').async('string');
+   await SOP_WORD.refreshOriginalCover(imported);
+   const originalPreview=SOP_WORD.originalCoverPreview(imported).map(block=>block.html).join('');
    const element=(tag,text)=>{const node=xml.createElementNS(w,'w:'+tag);if(text!==undefined)node.textContent=text;return node;};
    const old=element('tbl'),row=element('tr');
    old.append(row);
@@ -48,20 +57,43 @@ const root=path.resolve(__dirname,'..');
     r.append(element('t',value));paragraph.append(r);c.append(paragraph);row.append(c);
    }
    rows[1].replaceWith(old);
+   const inline=element('p'),label=element('r'),line=element('r'),style=element('rPr'),underline=element('u');
+   label.append(element('t','审　核：旧版审核　签字：'));
+   underline.setAttributeNS(w,'w:val','single');
+   style.append(underline);line.append(style,element('t','  旧版审核签字  '));
+   inline.append(label,line);rows[3].replaceWith(inline);
    zip.remove('customXml/sop-project.xml');
    serialize();
    const legacy=await read();
-   return {nestedTables,fields,imported:savedFields,originalUpdated:original.includes('会签补录'),legacy:[legacy.meta.qualitySigner,legacy.meta.qualitySignature]};
+   const retainedLegacy=SOP_WORD.originalFrontBlocks(legacy,'cover').map(block=>block.xml).join('');
+   await SOP_WORD.refreshOriginalCover(legacy);
+   const legacyPreview=SOP_WORD.originalCoverPreview(legacy).map(block=>block.html).join('');
+   return {nestedTables,fields,retained,imported:savedFields,
+    originalUpdated:original.includes('会签补录'),sourceSigned:sourceXml.includes('已签字')&&sourceXml.includes('签名乙'),
+    originalUnsigned:[original,originalPreview].every(text=>!text.includes('已签字')&&!text.includes('签名乙')),
+    legacy:[legacy.meta.qualitySigner,legacy.meta.qualitySignature,legacy.meta.reviewer,legacy.meta.reviewerSignature],
+    legacyUnsigned:[retainedLegacy,legacyPreview].every(text=>!text.includes('旧版签字')&&!text.includes('旧版审核签字')),
+    legacyUnderline:legacyPreview.includes('text-decoration:underline')&&legacyPreview.includes(String.fromCharCode(160))};
   });
   assert.equal(cover.nestedTables,0);
-  assert.deepEqual(cover.fields.map(f=>f.values),[['批准甲乙','签字：',''],['','签字：',''],['','签字：','已签字'],['审核甲','签字：',''],['','签字：','签名乙']]);
+  assert.deepEqual(cover.fields.map(f=>f.values),[['批准甲乙','签字：',''],['','签字：',''],['','签字：',''],['审核甲','签字：',''],['','签字：','']]);
   for(const field of cover.fields){
    assert.deepEqual(field.tabs,[['center','7677'],['center','8896'],['center','10172']]);
    assert.deepEqual(field.rules,[['1','972185'],['1','1043940']]);
   }
   assert.deepEqual(cover.imported,['Word外部改名','','已签字','审核甲','签名乙']);
-  assert(cover.originalUpdated);
-  assert.deepEqual(cover.legacy,['旧版姓名','旧版签字']);
+  assert.deepEqual(cover.retained,['已签字','签名乙']);
+  assert(cover.originalUpdated&&cover.sourceSigned&&cover.originalUnsigned&&cover.legacyUnsigned&&cover.legacyUnderline);
+  await page.evaluate(()=>{SOP.project.meta.approverSignature='旧签字隐藏验证';SOP.setSelected('front:cover:0');});
+  assert.equal(await page.locator('#editContent [data-front-key$="Signature"]').count(),0);
+  assert.equal(await page.locator('#editContent [data-front-key="approver"]').count(),1);
+  assert.deepEqual(await page.locator('#previewStage .reference-cover-sign > :last-child').allTextContents(),Array(5).fill(''));
+  assert.equal(await page.locator('#previewStage [data-print-target$="Signature"]').count(),0);
+  await page.locator('#metaBtn').click();
+  assert.equal(await page.locator('[data-docmeta$="Signature"]').count(),0);
+  assert.equal(await page.locator('[data-docmeta="approver"]').count(),1);
+  await page.locator('#formDialog').press('Escape');
+  assert.deepEqual(cover.legacy,['旧版姓名','旧版签字','旧版审核','旧版审核签字']);
   await page.locator('#settingsBtn').click();await page.locator('[data-setting="company"]').fill('示例制造有限公司');await page.locator('#logoFile').setInputFiles(path.join(root,'desktop/build/icon.png'));await page.waitForFunction(()=>document.querySelector('#settingsLogo').src.startsWith('data:image/png'));await page.locator('#dialogApply').click();
   const result=await page.evaluate(async()=>{
    const project=SOP.clone(SOP.project);project.settings.confidential=String.fromCharCode(9)+'保密等级：'+String.fromCharCode(10)+'一般';project.pages[0].name='准备';project.pages[0].steps='1、准备工具。';project.pages.push({...SOP.blankPage(),name:'检查',steps:'1、检查工件。'});project.pages.push({...SOP.blankPage(),name:'包装',steps:'1、包装入库。'});SOP.replaceProject(project);SOP.moveRenderedPage(0,2);

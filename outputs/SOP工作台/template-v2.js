@@ -3,7 +3,7 @@ const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({'&':'&amp
 const changes = [['number','序号'], ['mark','标　记'], ['count','处　数'], ['document','更改文件号'], ['signature','签字（日期）']];
 const historyFields = [['date','日 期'], ['number','文件归档申请单编号'], ['version','版本'], ['summary','内容概述'], ['author','制定'], ['reviewer','审核'], ['approver','批准']];
 const coverFields = [['number','文件编号'], ['title','文件名称'], ['bare','裸机成品料号'], ['packed','包装成品料号'], ['version','版　　本'], ['date','生效日期']];
-const coverSigners = [['approver','批准','approverSignature'], ['qualitySigner','质量会签','qualitySignature'], ['productionSigner','生产会签','productionSignature'], ['reviewer','审核','reviewerSignature'], ['author','制定','authorSignature']];
+const coverSigners = [['approver','批准'], ['qualitySigner','质量会签'], ['productionSigner','生产会签'], ['reviewer','审核'], ['author','制定']];
 const materialRows = 6, checkRows = 2, changeRows = 2, historyRows = 15;
 const operationCellWidth=9608, operationWordPadding={left:121,right:117};
 const dimensions = {operationWidthTwips:operationCellWidth, operationHeightTwips:8203, operationSidePaddingTwips:108,
@@ -107,7 +107,7 @@ function operationPaper(page, project, content, canvasOverflow=false){
 function coverPaper(project){
  const settings=project.settings, meta=project.meta, front=project.frontContent||{};
  const fields=coverFields.map(([key,label])=>overflow(label,esc(label+'：')+(key==='title'?title(meta):esc(meta[key])),'meta.'+key));
- const signers=coverSigners.map(([key,label,signature])=>'<div class="reference-cover-sign"><span>'+esc(label.length===2?[...label].join('　'):label)+'：</span>'+value(label,meta[key],'meta.'+key,'reference-sign-line')+'<span>签字：</span>'+value(label+'签字',meta[signature],'meta.'+signature,'reference-sign-line')+'</div>');
+ const signers=coverSigners.map(([key,label])=>'<div class="reference-cover-sign"><span>'+esc(label.length===2?[...label].join('　'):label)+'：</span>'+value(label,meta[key],'meta.'+key,'reference-sign-line')+'<span>签字：</span><div class="reference-sign-line"></div></div>');
  return article('cover',settings,'<div class="cover-box"><div class="cover-top"><div>'+logo(settings)+'</div><div>'+value('封面标题',front.coverHeading??'三阶文件','front.coverHeading')+'</div></div><div class="cover-content">'+value('公司名称',settings.company,'settings.company','cover-company')+fields.join('')+signers.join('')+'</div></div>');
 }
 

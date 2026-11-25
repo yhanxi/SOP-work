@@ -100,9 +100,9 @@ function coverSignatureParagraph(p,label,meta,native){
  indent.setAttributeNS(W,'w:left',left);
  first(pr,'jc').setAttributeNS(W,'w:val','left');
  const labelText=label.length===2?[...label].join('　'):label;
- const [name,signature]=coverSignerFields[label];
+ const [name]=coverSignerFields[label];
  fillParagraph(p,labelText+'：');
- for(const value of [meta[name],'签字：',meta[signature]]){
+ for(const value of [meta[name],'签字：','']){
   const field=run(doc,cleanHeaderText(value),22);
   first(field,'t').before(el(doc,'tab'));
   p.append(field);
@@ -124,7 +124,7 @@ function referenceCover(t,project,native){
  for(const [i,label]of Object.keys(coverSignerFields).entries())coverSignatureParagraph(ps[i+9],label,m,native);
 }
 function coverSignerParagraph(p){
- const parts=txt(p).split('\t'),label=parts[0].replace(/[\s：:]/g,'');
+ const parts=children(p,'r').map(r=>txt(r)).join('').split('\t'),label=parts[0].replace(/[\s：:]/g,'');
  if(parts.length===4&&Object.hasOwn(coverSignerFields,label)&&/^签字[：:]$/.test(parts[2].trim()))return {label,name:parts[1].trim(),signature:parts[3].trim()};
 }
 function fillCoverSignerName(p,value){
@@ -141,6 +141,34 @@ function coverSignerCells(row){
  if(row?.localName!=='tr')return;
  const cs=cells(row),label=txt(cs[1]).replace(/[\s：:]/g,'');
  if(cs.length===8&&Object.hasOwn(coverSignerFields,label)&&/^签字[：:]$/.test(txt(cs[5]).trim()))return {label,name:cs[3],signature:cs[7]};
+}
+function clearCoverSignatures(block){
+ for(const row of desc(block,'tr')){
+  const signer=coverSignerCells(row);
+  if(signer)for(const text of desc(signer.signature,'t'))text.textContent='';
+ }
+ for(const p of desc(block,'p')){
+  if(coverSignerCells(p.parentElement?.parentElement))continue;
+  const runs=children(p,'r'),tabs=runs.flatMap(r=>children(r,'tab'));
+  if(coverSignerParagraph(p)){
+   const start=tabs[2];
+   for(const text of runs.flatMap(r=>children(r,'t')))if(start.compareDocumentPosition(text)&Node.DOCUMENT_POSITION_FOLLOWING)text.textContent='';
+   continue;
+  }
+  const texts=runs.flatMap(r=>children(r,'t')),joined=texts.map(n=>n.textContent).join('');
+  const match=joined.match(/^([^：:]+)[：:].*?签字[：:]/s);
+  if(!match||!Object.hasOwn(coverSignerFields,match[1].replace(/\s/g,'')))continue;
+  let offset=0;
+  for(const text of texts){
+   const value=text.textContent,start=Math.max(0,match[0].length-offset);
+   offset+=value.length;
+   if(start>=value.length)continue;
+   // Underlined spaces preserve the original line in older Word covers.
+   const blank=value.slice(start).replace(/[^\s_＿﹏]/gu,c=>fullWidthText.test(c)?'\u3000':'\u00a0').replace(/ /g,'\u00a0');
+   text.textContent=value.slice(0,start)+blank;
+   text.setAttribute('xml:space','preserve');
+  }
+ }
 }
 function readCoverValues(table){
  const result={};
@@ -596,9 +624,40 @@ function originalFrontBlocks(project,kind){
  const baseline=original.metaBaseline||{},keys={number:'文件编号',bare:'裸机成品料号',packed:'包装成品料号',version:'版本',date:'生效日期',author:'制定',reviewer:'审核',approver:'批准',qualitySigner:'质量会签',productionSigner:'生产会签'},updates=[];
  for(const [key,label]of Object.entries(keys))if(project.meta[key]!==baseline[key])updates.push({label,value:project.meta[key]||''});
  if(project.meta.product!==baseline.product||project.meta.title!==baseline.title)updates.push({label:'文件名称',value:[project.meta.product,project.meta.title].filter(Boolean).join(' ')});
- return original.blocks.map(block=>{const d=xml(block.xml),table=desc(d,'tbl')[0];if(table&&children(table,'tr')[0]&&cells(children(table,'tr')[0]).length===2){const c=cell(table,0,1);centerCell(c,project.frontContent?.coverHeading??txt(c),32);}for(const p of desc(d,'p')){const text=txt(p),normal=text.replace(/\s/g,'');for(const {label,value}of updates){if(!normal.startsWith(label+':')&&!normal.startsWith(label+'：'))continue;const split=coverSignerCells(p.parentElement?.parentElement);if(split?.label===label){fillCell(split.name,value);break;}if(coverSignerParagraph(p)?.label===label){fillCoverSignerName(p,value);break;}const colon=text.search(/[：:]/);if(colon<0)continue;const nodes=children(p,'r').flatMap(r=>children(r,'t')),joined=nodes.map(n=>n.textContent).join(''),start=joined.search(/[：:]/)+1,end=joined.indexOf('签字',start),segment=joined.slice(start,end<0?joined.length:end),lead=segment.match(/^\s*/)[0].length,tail=segment.match(/\s*$/)[0].length,from=start+lead,to=Math.max(from,start+segment.length-tail);let pos=0,inserted=false;for(const n of nodes){const s=n.textContent,next=pos+s.length;if((next>from&&pos<to)||(!inserted&&from===to&&pos<=from&&next>=from)){n.textContent=s.slice(0,Math.max(0,from-pos))+(inserted?'':value)+(next>to?s.slice(Math.max(0,to-pos)):'');n.setAttribute('xml:space','preserve');inserted=true;}pos=next;}break;}}return {...block,xml:serialize(d.documentElement)};});
+ return original.blocks.map(block=>{const d=xml(block.xml),table=desc(d,'tbl')[0];if(table&&children(table,'tr')[0]&&cells(children(table,'tr')[0]).length===2){const c=cell(table,0,1);centerCell(c,project.frontContent?.coverHeading??txt(c),32);}for(const p of desc(d,'p')){const text=txt(p),normal=text.replace(/\s/g,'');for(const {label,value}of updates){if(!normal.startsWith(label+':')&&!normal.startsWith(label+'：'))continue;const split=coverSignerCells(p.parentElement?.parentElement);if(split?.label===label){fillCell(split.name,value);break;}if(coverSignerParagraph(p)?.label===label){fillCoverSignerName(p,value);break;}const colon=text.search(/[：:]/);if(colon<0)continue;const nodes=children(p,'r').flatMap(r=>children(r,'t')),joined=nodes.map(n=>n.textContent).join(''),start=joined.search(/[：:]/)+1,end=joined.indexOf('签字',start),segment=joined.slice(start,end<0?joined.length:end),lead=segment.match(/^\s*/)[0].length,tail=segment.match(/\s*$/)[0].length,from=start+lead,to=Math.max(from,start+segment.length-tail);let pos=0,inserted=false;for(const n of nodes){const s=n.textContent,next=pos+s.length;if((next>from&&pos<to)||(!inserted&&from===to&&pos<=from&&next>=from)){n.textContent=s.slice(0,Math.max(0,from-pos))+(inserted?'':value)+(next>to?s.slice(Math.max(0,to-pos)):'');n.setAttribute('xml:space','preserve');inserted=true;}pos=next;}break;}}clearCoverSignatures(d);return {...block,xml:serialize(d.documentElement)};});
 }
-async function refreshOriginalCover(project,kind='cover'){const original=project.originalFront?.[kind];if(!original)return false;const key=JSON.stringify({version:3,meta:project.meta,front:project.frontContent});if(original.previewKey===key)return false;original.previewKey=key;try{const z=new JSZip();for(const [name,data]of Object.entries(project.nativeWord.files))z.file(name,data,{base64:true});const rels=new Map([...xml(await z.file('word/_rels/document.xml.rels').async('string')).documentElement.children].map(n=>[n.getAttribute('Id'),n.getAttribute('Target')])),{styles,theme}=await window.SOP_IMPORT.typographyParts(z),d=xml('<root>'+originalFrontBlocks(project,kind).map(b=>b.xml).join('')+'</root>');original.previewBlocks=await window.SOP_IMPORT.capture(d.documentElement,z,rels,styles,theme);return true;}catch(error){original.previewKey='';return false;}}
+const coverPreviews=new WeakMap();
+const originalCoverPreview=project=>coverPreviews.get(project.originalFront?.cover)?.blocks;
+async function captureOriginalPreview(project,kind){
+ const z=new JSZip();
+ for(const [name,data]of Object.entries(project.nativeWord.files))z.file(name,data,{base64:true});
+ const rels=new Map([...xml(await z.file('word/_rels/document.xml.rels').async('string')).documentElement.children].map(n=>[n.getAttribute('Id'),n.getAttribute('Target')]));
+ const {styles,theme}=await window.SOP_IMPORT.typographyParts(z),d=xml('<root>'+originalFrontBlocks(project,kind).map(b=>b.xml).join('')+'</root>');
+ return window.SOP_IMPORT.capture(d.documentElement,z,rels,styles,theme);
+}
+async function refreshOriginalCover(project,kind='cover'){
+ const original=project.originalFront?.[kind];
+ if(!original)return false;
+ const key=JSON.stringify({version:3,meta:project.meta,front:project.frontContent});
+ if(kind!=='cover'){
+  if(original.previewKey===key)return false;
+  original.previewKey=key;
+  try{original.previewBlocks=await captureOriginalPreview(project,kind);return true;}
+  catch(error){original.previewKey='';return false;}
+ }
+ const previous=coverPreviews.get(original);
+ if(previous?.key===key){await previous.pending;return false;}
+ const cached={key,blocks:previous?.blocks};
+ coverPreviews.set(original,cached);
+ cached.pending=captureOriginalPreview(project,kind).then(blocks=>{
+  cached.blocks=blocks;
+  return coverPreviews.get(original)===cached;
+ }).catch(()=>{
+  cached.key='';
+  return false;
+ });
+ return cached.pending;
+}
 function convertOriginalFlow(project){
  const source=project.originalFront?.flow;if(!source) return {model:window.SOP_OBJECTS.normalize(),notice:'空白流程副本，请添加节点。'};
  const d=xml('<root>'+source.blocks.map(b=>b.xml).join('')+'</root>'),WP='http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing',A='http://schemas.openxmlformats.org/drawingml/2006/main',S='http://schemas.microsoft.com/office/word/2010/wordprocessingShape',one=(n,name)=>n&&[...n.children].find(e=>e.localName===name),objects=[],lines=[];let unsupported=0;
@@ -616,5 +675,5 @@ function exportProof(project,layout,front,key){
  if(typeof key!=='string'||!key)throw Error('请先选择要校样的工序。');
  return exportDocx(project,layout,front,key);
 }
-window.SOP_WORD={exportProof,flowNoteText,originalFrontBlocks,refreshOriginalCover,convertOriginalFlow,ensureOriginalFront,exportOriginal,exportDocx,operationRequirementBlocks,importDocx,legacyMissingCount,recoverMissing};
+window.SOP_WORD={exportProof,flowNoteText,originalFrontBlocks,originalCoverPreview,refreshOriginalCover,convertOriginalFlow,ensureOriginalFront,exportOriginal,exportDocx,operationRequirementBlocks,importDocx,legacyMissingCount,recoverMissing};
 })();

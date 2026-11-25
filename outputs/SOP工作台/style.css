@@ -275,6 +275,7 @@
 .reference-operation .wide-sign { font-size: 10.5pt; }
 .reference-operation .wide-sign .reference-field { height: calc(1103 * var(--twip) - 1pt); }
 .reference-operation .reference-changes :is(td,th) { height: calc(230 * var(--twip)); }
+.reference-operation .reference-changes tr:last-child > th { border-bottom: 0; }
 .reference-operation .reference-changes td { font-size: 9pt; }
 .reference-operation .reference-changes .reference-field { height: calc(230 * var(--twip) - 1pt); line-height: 1; }
 
