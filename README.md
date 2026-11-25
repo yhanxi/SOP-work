@@ -13,7 +13,13 @@
 
 软件安装包和更新文件发布在独立的 [SOP-work-releases 仓库](https://github.com/yhanxi/SOP-work-releases)。
 
-首次使用请到[版本列表](https://github.com/yhanxi/SOP-work-releases/releases)，选择含 SOPStudio-Setup-VERSION-x64.exe 或完整 ZIP 的版本。安装版双击 EXE 安装，免安装版解压后运行 SOPStudio.exe。完整安装包与日常小更新的版本可能不同，安装后可通过「软件更新」升级到最新兼容版本。
+首次使用可下载 **0.4.40 完整版**。
+
+- [Windows x64 EXE 安装包](https://github.com/yhanxi/SOP-work-releases/releases/download/v0.4.40/SOPStudio-Setup-0.4.40-x64.exe)，下载后双击安装。
+- [Windows x64 ZIP 免安装包](https://github.com/yhanxi/SOP-work-releases/releases/download/v0.4.40/SOPStudio-0.4.40-x64.zip)，完整解压后运行 SOPStudio.exe。
+- [版本列表与更新说明](https://github.com/yhanxi/SOP-work-releases/releases)，查看后续发布。
+
+已安装用户可通过软件内的「软件更新」升级。后续日常更新版本可能高于完整安装包版本，首次安装后可检查更新。
 
 日常更新使用签名 ASAR 程序包，由软件负责下载与安装。ASAR 文件无法作为安装程序直接运行。软件启动时可自动检查更新，也可手动检查；下载源支持自定义 HTTPS 备用目录。
 
