@@ -178,6 +178,7 @@
  border-top: var(--rule);
 }
 .reference-station-foot span { border-bottom: var(--rule); align-content: center; }
+.preview-actions { justify-content: flex-end; margin-inline-start: 8px; }
 .reference-operation .wide-body .op-cell { padding: 0 calc(108 * var(--twip)); }
 .reference-operation .op-cell p,.reference-measure p {
  margin: 0 0 var(--sop-operation-paragraph-after); line-height: var(--sop-operation-line-height);

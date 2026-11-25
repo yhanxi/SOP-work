@@ -487,7 +487,7 @@ function refreshRecovery(){
  $('#recoverMissingBtn').onclick=async()=>{const button=$('#recoverMissingBtn');button.disabled=true;try{const before=clone(project),result=await window.SOP_WORD.recoverMissing(before);if(!result)return;download(new Blob([JSON.stringify(before,null,2)],{type:'application/json'}),filename()+'_恢复前备份.sop.json');snapshot();project=result.project;selected=project.pages[0]?.id;await prepareImages();renderEditor();changed();refresh();toast('已恢复 '+result.added+' 个漏读工序，当前前置 '+front.length+' 页＋正文 '+layout.length+' 页，共 '+(front.length+layout.length)+' 页。');}catch(e){toast('恢复失败：'+e.message,true);button.disabled=false;}};
  }
 }
-function refresh(){window.SOP_IMPORT.refreshBody(project).then(updated=>{if(updated)refresh();});if(window.SOP_WORD?.refreshOriginalCover)Promise.all(['cover','flow'].map(kind=>window.SOP_WORD.refreshOriginalCover(project,kind))).then(updated=>{if(updated.some(Boolean))refresh();});refreshRecovery();$('#brandLogo').src=A.appLogo||A.logo;recalc();if(!project.pages.find(p=>p.id===selected)&&!front.some(f=>frontKey(f)===selected))selected=project.pages[0]?.id;$('#projectTitle').textContent=metadataTitle();$('#pageCount').textContent=layout.length+' 工序页';refreshNav();const selectedFront=front.find(f=>frontKey(f)===selected);const p=layout.find(x=>x.sourceId===selected);refreshProcessNumberWarning(p);$('#copyBtn').disabled=!!selectedFront;$('#continueBtn').disabled=!!selectedFront;const index=selectedDocumentIndex(),entry=orderedPages()[index];if(highlightedIssue?.pageKey!==entry?.key)clearIssueHighlight();if(entry)mountPaper($('#previewStage'),paperFor(entry),$('#previewStage').clientWidth,entry,index,true);$('#previewStage').ondblclick=event=>{if(event.target.closest('.preview-issues'))return;const entry=selectedFront?$('#editFlowGraph'):$('#editPageCanvas');entry?.click();};$('#previewCaption').textContent=selectedFront?'文档位置 '+(selectedDocumentIndex()+1)+' · 不计工序页码':p?`第 ${p.pageNo} 页 / 共 ${p.total} 页`:'尚未添加工序';if(!entry)$('#previewStage').innerHTML='<div class="empty-state">添加一道工序开始编写</div>';$('#layoutHint').textContent=selectedFront?'内容、顺序均可修改；导出时保持当前页序。':p?'固定单页 · 不自动缩放或续页，超框或遮挡请手动调整。':'';if(p?.canvas){const available=canvasSpace(p).height;$('#layoutHint').textContent=available<=0?'文字已占满内容框，请先调整文字。':window.SOP_OBJECTS.contentHeight(p.canvas)>available?'画布使用文字之外的剩余空间；有元素超出区域，请手动调整。':'文字保留完整高度，剩余区域用于画布；不自动缩放或续页。';}$('#undoBtn').disabled=!undo.length;}
+function refresh(){window.SOP_IMPORT.refreshBody(project).then(updated=>{if(updated)refresh();});if(window.SOP_WORD?.refreshOriginalCover)Promise.all(['cover','flow'].map(kind=>window.SOP_WORD.refreshOriginalCover(project,kind))).then(updated=>{if(updated.some(Boolean))refresh();});refreshRecovery();$('#brandLogo').src=A.appLogo||A.logo;recalc();if(!project.pages.find(p=>p.id===selected)&&!front.some(f=>frontKey(f)===selected))selected=project.pages[0]?.id;$('#projectTitle').textContent=metadataTitle();$('#pageCount').textContent=layout.length+' 工序页';refreshNav();const selectedFront=front.find(f=>frontKey(f)===selected);const p=layout.find(x=>x.sourceId===selected);refreshProcessNumberWarning(p);$('#copyBtn').disabled=!!selectedFront;$('#continueBtn').disabled=!!selectedFront;const index=selectedDocumentIndex(),entry=orderedPages()[index];$('#wordProofBtn').hidden=entry?.kind!=='body';if(highlightedIssue?.pageKey!==entry?.key)clearIssueHighlight();if(entry)mountPaper($('#previewStage'),paperFor(entry),$('#previewStage').clientWidth,entry,index,true);$('#previewStage').ondblclick=event=>{if(event.target.closest('.preview-issues'))return;const entry=selectedFront?$('#editFlowGraph'):$('#editPageCanvas');entry?.click();};$('#previewCaption').textContent=selectedFront?'文档位置 '+(selectedDocumentIndex()+1)+' · 不计工序页码':p?`第 ${p.pageNo} 页 / 共 ${p.total} 页`:'尚未添加工序';if(!entry)$('#previewStage').innerHTML='<div class="empty-state">添加一道工序开始编写</div>';$('#layoutHint').textContent=selectedFront?'内容、顺序均可修改；导出时保持当前页序。':p?'固定单页 · 不自动缩放或续页，超框或遮挡请手动调整。':'';if(p?.canvas){const available=canvasSpace(p).height;$('#layoutHint').textContent=available<=0?'文字已占满内容框，请先调整文字。':window.SOP_OBJECTS.contentHeight(p.canvas)>available?'画布使用文字之外的剩余空间；有元素超出区域，请手动调整。':'文字保留完整高度，剩余区域用于画布；不自动缩放或续页。';}$('#undoBtn').disabled=!undo.length;}
 function pin(field){const p=page();if(!p)return;snapshot();if(field==='contentStyle'&&!p.fixed.includes(field))p.contentStyle=textStyle(p,'steps');p.fixed=p.fixed||[];p.fixed=p.fixed.includes(field)?p.fixed.filter(x=>x!==field):[...p.fixed,field];renderEditor();changed();}
 function applySignoffToAll(){
  const current=page();
@@ -789,7 +789,8 @@ async function addPhotos(files){
   toast('照片已加入工序，页码已重新计算。');
  }catch(error){toast(error.message,true);}
 }
-async function prepareImages(candidate=project){if(!candidate.nativeWord&&candidate.frontContent?.flowManual&&!candidate.frontContent?.flowGraph){const c=candidate.frontContent||{},source=c.flowManual?String(c.flowText||'').split('\n').filter(Boolean).map((name,i)=>({name,processId:String(i)})):candidate.pages;if(source.length<=24)candidate.frontContent={...c,flowGraph:window.SOP_OBJECTS.fromProcesses(source),flowMode:'editable'};}if(window.SOP_WORD?.ensureOriginalFront)await window.SOP_WORD.ensureOriginalFront(candidate);await window.SOP_IMPORT.refreshBody(candidate);for(const p of candidate.pages)for(const ph of p.photos){if(!ph.width||!ph.height){const im=await loadImage(ph.data);ph.width=im.naturalWidth;ph.height=im.naturalHeight;}if(ph.marks?.length)ph.rendered=await annotated(ph);else if(ph.rendered===ph.data)delete ph.rendered;}}
+async function prepareImages(candidate=project){if(!candidate.nativeWord&&candidate.frontContent?.flowManual&&!candidate.frontContent?.flowGraph){const c=candidate.frontContent||{},source=c.flowManual?String(c.flowText||'').split('\n').filter(Boolean).map((name,i)=>({name,processId:String(i)})):candidate.pages;if(source.length<=24)candidate.frontContent={...c,flowGraph:window.SOP_OBJECTS.fromProcesses(source),flowMode:'editable'};}if(window.SOP_WORD?.ensureOriginalFront)await window.SOP_WORD.ensureOriginalFront(candidate);await window.SOP_IMPORT.refreshBody(candidate);await prepareOperationImages(candidate.pages);}
+async function prepareOperationImages(pages){for(const p of pages)for(const ph of p.photos){if(!ph.width||!ph.height){const im=await loadImage(ph.data);ph.width=im.naturalWidth;ph.height=im.naturalHeight;}if(ph.marks?.length)ph.rendered=await annotated(ph);else if(ph.rendered===ph.data)delete ph.rendered;}}
 function showForm(title,html,apply){$('#dialogTitle').textContent=title;$('#dialogBody').innerHTML=html;$('#dialogApply').hidden=!apply;$('#dialogApply').textContent='保存';$('#dialogApply').onclick=()=>{try{apply?.();$('#formDialog').close();}catch(e){toast(e.message,true);}};$('#formDialog').showModal();}
 function editMetadata(){const fields=coverMetaFields;showForm('文档信息',`<div class="notice">这些信息只填写一次，所有页面同步更新。公司名称和 Logo 可在“固定格式”中修改。</div><div class="form-grid">${fields.map(([k,l])=>`<label><span>${l}</span><input data-docmeta="${k}" value="${esc(project.meta[k])}"></label>`).join('')}</div><div class="section-gap"><div class="field-top"><strong>本次修改履历</strong></div><input id="historySummary" placeholder="可选：填写本次修改内容，保存后加入修改履历"></div>`,()=>{const summary=$('#historySummary').value.trim();if(summary&&project.history.length>=T.historyRows)throw Error('当前修改履历页最多 '+T.historyRows+' 条，请先在项目中归档旧记录。');snapshot();$$('[data-docmeta]').forEach(el=>project.meta[el.dataset.docmeta]=el.value);if(summary){project.history.push({date:project.meta.date||new Date().toLocaleDateString('sv-SE'),number:project.meta.number,version:project.meta.version,summary,author:project.meta.author,reviewer:project.meta.reviewer,approver:project.meta.approver});}changed();refresh();});}
 function editSettings(){const s=project.settings,reference=window.SOP_REFERENCE?.defaults;let pendingLogo=s.logo||'';
@@ -854,7 +855,7 @@ async function showFull(scrollTo=0){
   else dialog.scrollTop=0;
  }catch(error){toast('无法打开预览：'+error.message,true);}
 }
-async function collectProjectedIssues(){
+async function collectProjectedIssues(pageKey){
  await document.fonts.ready;
  recalc();
  const stage=document.createElement('div');
@@ -863,6 +864,7 @@ async function collectProjectedIssues(){
  try{
   const reports=[];
   for(const [index,entry]of orderedPages().entries()){
+   if(pageKey&&entry.key!==pageKey)continue;
    stage.innerHTML=paperFor(entry);
    const findings=T.printIssues(stage.firstElementChild);
    if(findings.length)reports.push(issueReport(entry,index,findings));
@@ -1015,10 +1017,18 @@ $('#closeExportIssues').onclick=()=>$('#exportIssuesDialog').close();
 $('#previewDialog').addEventListener('close',()=>{
  if(!$('#previewDialog').open)renderIssueList($('#fullPreviewIssues'),[]);
 });
+let exportIssuesTrigger=$('#docxBtn');
+function showExportIssues(reports,trigger){
+ exportIssuesTrigger=trigger;
+ const host=$('#exportIssues');
+ renderIssueList(host,reports);
+ $('#exportIssuesDialog').showModal();
+ focusIssueControl(host.querySelector('button'));
+}
 $('#exportIssuesDialog').addEventListener('close',()=>{
  if($('#exportIssuesDialog').open)return;
  renderIssueList($('#exportIssues'),[]);
- if(document.activeElement===document.body)$('#docxBtn').focus();
+ if(document.activeElement===document.body)(exportIssuesTrigger.hidden?$('#zoomBtn'):exportIssuesTrigger).focus();
 });
 $('#docxBtn').onclick=async()=>{
  const button=$('#docxBtn');
@@ -1028,10 +1038,7 @@ $('#docxBtn').onclick=async()=>{
   await prepareImages();
   const reports=await collectProjectedIssues();
   if(reports.length){
-   const host=$('#exportIssues');
-   renderIssueList(host,reports);
-   $('#exportIssuesDialog').showModal();
-   focusIssueControl(host.querySelector('button'));
+   showExportIssues(reports,button);
    return;
   }
   const blob=await window.SOP_WORD.exportDocx(project,layout,front);
@@ -1039,6 +1046,43 @@ $('#docxBtn').onclick=async()=>{
   toast('Word 已生成，请打开核对。页码动态域和可再次导入的项目数据已写入。');
  }catch(error){toast('导出失败：'+error.message,true);}
  finally{button.disabled=false;button.textContent='导出 Word';}
+};
+const proofButton=$('#wordProofBtn'),desktopProof=typeof window.sopDesktop?.openProof==='function';
+const proofLabel=desktopProof?'Word 校样':'下载本页 Word 校样';
+proofButton.textContent=proofLabel;
+proofButton.title=desktopProof?'在 Word 或 WPS 打开当前工序校样':'下载当前工序校样文件，请在浏览器下载目录手动保留或删除';
+proofButton.onclick=async()=>{
+ const entry=orderedPages()[selectedDocumentIndex()];
+ if(entry?.kind!=='body')return;
+ const currentProject=project,source=project.pages.find(p=>p.id===entry.page.sourceId);
+ if(!source)return;
+ const startRevision=revision,startSelection=selected;
+ const stillCurrent=()=>project===currentProject&&revision===startRevision&&selected===startSelection;
+ proofButton.disabled=true;
+ proofButton.textContent='校样生成中…';
+ try{
+  const operationOnly={...currentProject,pages:[source]};
+  await window.SOP_IMPORT.refreshBody(operationOnly);
+  await prepareOperationImages(operationOnly.pages);
+  if(!stillCurrent())return;
+  const reports=await collectProjectedIssues(entry.key);
+  if(!stillCurrent())return;
+  if(reports.length){showExportIssues(reports,proofButton);return;}
+  const blob=await window.SOP_WORD.exportProof(currentProject,layout,front,entry.key);
+  if(!stillCurrent())return;
+  const name='工序'+window.SOP_TEMPLATE.operationLabel(entry.page)+'_'+(entry.page.name||'未命名工序')+(entry.page.isContinuation?'（续）':'');
+  const file=name.replace(/[\\/:*?"<>|\u0000-\u001f]/g,' ').slice(0,100).trim()+'_Word校样.docx';
+  if(desktopProof){
+   const bytes=new Uint8Array(await blob.arrayBuffer());
+   if(!stillCurrent())return;
+   const result=await window.sopDesktop.openProof({bytes,name:file});
+   if(!result?.ok)throw Error(result?.error||'未能打开 Word 或 WPS。');
+  }else{
+   download(blob,file);
+   toast('本页 Word 校样已下载，请在浏览器下载目录手动保留或删除。');
+  }
+ }catch(error){if(stillCurrent())toast('校样失败：'+error.message,true);}
+ finally{proofButton.disabled=false;proofButton.textContent=proofLabel;}
 };
 window.SOP={projectForStorage,validateProjectedPages,canvasSpace,operationPhotoLayout,textStyle,bodyLines,snapshot,changed,renderEditor,moveDocumentPage,orderedPages,moveRenderedPage,get project(){return project;},get layout(){return layout;},get front(){return front;},uid,clone,esc,blankPage,validate,annotated,prepareImages,recalc,refresh,operationPaper,frontPaper,flowImage,toast,download,filename,replaceProject(p){snapshot();project=validate(p);selected=p.pages[0]?.id;renderEditor();changed();refresh();},setSelected(id){selected=id;renderEditor();refresh();}};
 projectFiles=window.SOP_FILES.create({getProject:()=>projectForStorage(project),filename,toast,download,stateText:p=>window.SOP_IMPORT.projectState(p),recover:flushSave,applyProject:async(p,commit)=>{const candidate=validate(p);await prepareImages(candidate);await commit();clearTimeout(saveTimer);project=candidate;undo=[];selected=project.pages[0]?.id;renderEditor();changed();refresh();}});

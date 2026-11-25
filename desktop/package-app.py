@@ -15,6 +15,7 @@ files={
  **{name:(root/name).read_bytes() for name in ['updater.cjs','update-core.cjs','update-helper.cjs','update-public.pem']},
  'main.cjs':(root/'main.cjs').read_bytes(),
  'project-files.cjs':(root/'project-files.cjs').read_bytes(),
+ **{name:(root/name).read_bytes() for name in ['proof-files.cjs','proof-cleanup.ps1']},
  'preload.cjs':(root/'preload.cjs').read_bytes(),
  'build/icon.ico':(root/'build/icon.ico').read_bytes(),
  'renderer/assets.js':(root/'blank-assets.js').read_bytes(),

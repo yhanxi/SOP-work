@@ -157,7 +157,7 @@ async function refreshBody(project){
  return results.some(Boolean);
 }
 
-function resolve(target){const parts=['word'];for(const s of target.replace(/^\//,'').split('/')){if(s==='..')parts.pop();else if(s!=='.'&&s)parts.push(s);}return target.startsWith('/')?target.slice(1):parts.join('/');}
+function resolve(target,owner='word/document.xml'){const parts=target.startsWith('/')?[]:owner.split('/').slice(0,-1);for(const s of target.split('/')){if(s==='..')parts.pop();else if(s!=='.'&&s)parts.push(s);}return parts.join('/');}
 function branch(n){if(n.namespaceURI==='http://schemas.openxmlformats.org/markup-compatibility/2006'&&n.localName==='AlternateContent')return one(n,'Choice')||one(n,'Fallback');return null;}
 const wNodes=(node,name)=>[...(node?.getElementsByTagNameNS(W,name)||[])];
 const aNode=(node,name)=>node?.getElementsByTagNameNS(A,name)[0];
@@ -422,37 +422,85 @@ function importedStyles(target,source,prefix){
  return normal?prefix+normal:fallback;
 }
 
-async function exporter(source,z,rels,ct,doc){
+const relationshipAttribute=attr=>attr.namespaceURI===R||attr.namespaceURI==='urn:schemas-microsoft-com:office:office'&&attr.localName==='relid';
+const relationshipIds=roots=>new Set(roots.flatMap(root=>[root,...root.getElementsByTagName('*')].flatMap(node=>[...node.attributes].filter(relationshipAttribute).map(attr=>attr.value))));
+const decode=data=>new TextDecoder().decode(Uint8Array.from(atob(data),c=>c.charCodeAt(0)));
+function copyProofPart(files,z,name){
+ const path='sop-import/'+name;
+ if(!files[name]||z.file(path))return;
+ z.file(path,files[name],{base64:true});
+ const parts=name.split('/'),basename=parts.pop(),relationshipPath=[...parts,'_rels',basename+'.rels'].join('/');
+ if(!files[relationshipPath])return;
+ const relationships=parse(decode(files[relationshipPath]));
+ const referenced=/\.(xml|vml)$/i.test(name)?relationshipIds([parse(decode(files[name])).documentElement]):null;
+ for(const rel of [...relationships.documentElement.children]){
+  if(referenced&&!referenced.has(rel.getAttribute('Id'))&&!/\/(chartStyle|chartColorStyle)$/.test(rel.getAttribute('Type'))){rel.remove();continue;}
+  if(rel.getAttribute('TargetMode')==='External')continue;
+  const dependency=resolve(rel.getAttribute('Target'),name);
+  copyProofPart(files,z,dependency);
+  rel.setAttribute('Target','/sop-import/'+dependency);
+ }
+ z.file('sop-import/'+relationshipPath,serialize(relationships));
+}
+function scopeProofStyles(styles,numbering,roots){
+ const styleRefs=new Set(['pStyle','rStyle','tblStyle','basedOn','next','link','styleLink','numStyleLink']);
+ const declarations=[
+  [styles,'style','styleId',styleRefs],
+  [numbering,'num','numId',new Set(['numId'])],
+  [numbering,'abstractNum','abstractNumId',new Set(['abstractNumId'])],
+  [numbering,'numPicBullet','numPicBulletId',new Set(['lvlPicBulletId'])],
+ ];
+ const scopes=declarations.map(([file,tag,id,refs])=>({items:new Map(wNodes(file,tag).map(node=>[val(node,id),node])),refs}));
+ const used=new Set();
+ function visit(node){
+  if(!node||used.has(node))return;
+  used.add(node);
+  for(const ref of wNodes(node,'*'))for(const {items,refs}of scopes)if(refs.has(ref.localName))visit(items.get(val(ref,'val')));
+ }
+ visit(one(styles?.documentElement,'docDefaults'));
+ visit(defaultParagraph(styles));
+ for(const root of roots)visit(root);
+ for(const {items}of scopes)for(const node of items.values())if(!used.has(node))node.remove();
+}
+async function exporter(source,z,rels,ct,doc,proofBlocks){
  if(!source)return ()=>[];
- // Keep dependency paths together, so image/chart relationships within imported parts still resolve.
- for(const [name,data]of Object.entries(source.files))if(name!=='_rels/.rels')z.file('sop-import/'+name,data,{base64:true});
+ const proofRoots=proofBlocks&&proofBlocks.map(block=>parse(block.xml).documentElement);
+ const srcRel=parse(decode(source.files['word/_rels/document.xml.rels']||'')),ids=new Map();
+ const sourceRelationships=[...srcRel.documentElement.children];
+ const usedIds=proofRoots&&relationshipIds(proofRoots);
+ const selectedRelationships=sourceRelationships.filter(rel=>!/\/(styles|numbering|settings|header|footer|customXml)$/.test(rel.getAttribute('Type'))&&(!usedIds||usedIds.has(rel.getAttribute('Id'))));
+ // Keep dependencies of the selected native objects and their relationship paths together.
+ if(proofRoots){
+  for(const rel of selectedRelationships)if(rel.getAttribute('TargetMode')!=='External')copyProofPart(source.files,z,resolve(rel.getAttribute('Target')));
+ }else for(const [name,data]of Object.entries(source.files))if(name!=='_rels/.rels')z.file('sop-import/'+name,data,{base64:true});
  const sourceTypes=parse(source.types);for(const type of sourceTypes.documentElement.children){if(type.localName==='Override'){if(!z.file('sop-import'+type.getAttribute('PartName')))continue;const copy=ct.importNode(type,true);copy.setAttribute('PartName','/sop-import'+type.getAttribute('PartName'));ct.documentElement.append(copy);}else if(![...ct.documentElement.children].some(t=>t.getAttribute('Extension')===type.getAttribute('Extension')))ct.documentElement.append(ct.importNode(type,true));}
- const srcRel=parse(new TextDecoder().decode(Uint8Array.from(atob(source.files['word/_rels/document.xml.rels']||''),c=>c.charCodeAt(0)))),ids=new Map();let count=0;
- for(const rel of srcRel.documentElement.children){if(/\/(styles|numbering|settings|header|footer|customXml)$/.test(rel.getAttribute('Type')))continue;const id='rIdImported'+(++count),copy=rels.importNode(rel,true);ids.set(rel.getAttribute('Id'),id);copy.setAttribute('Id',id);if(copy.getAttribute('TargetMode')!=='External')copy.setAttribute('Target','../sop-import/'+resolve(copy.getAttribute('Target')));rels.documentElement.append(copy);}
- const decode=data=>new TextDecoder().decode(Uint8Array.from(atob(data),c=>c.charCodeAt(0)));
+ for(const [index,rel]of selectedRelationships.entries()){const id='rIdImported'+(index+1),copy=rels.importNode(rel,true);ids.set(rel.getAttribute('Id'),id);copy.setAttribute('Id',id);if(copy.getAttribute('TargetMode')!=='External')copy.setAttribute('Target','../sop-import/'+resolve(copy.getAttribute('Target')));rels.documentElement.append(copy);}
  const stylePrefix='SopImported_';
  const part=type=>{
   const relation=[...srcRel.documentElement.children].find(rel=>rel.getAttribute('Type')?.endsWith('/'+type));
   return relation?source.files[resolve(relation.getAttribute('Target'))]:null;
  };
  const themeFile=part('theme'),theme=themeValues(themeFile?parse(decode(themeFile)):null),stylesFile=part('styles')||source.files['word/styles.xml'];
+ const numberingFile=part('numbering')||source.files['word/numbering.xml'];
+ const styles=stylesFile?parse(decode(stylesFile)):null,numbering=numberingFile?parse(decode(numberingFile)):null;
+ if(proofRoots)scopeProofStyles(styles,numbering,proofRoots);
  let defaultStyle='',language='zh-CN';
- if(stylesFile&&z.file('word/styles.xml')){
-  const target=parse(await z.file('word/styles.xml').async('string')),styles=parse(decode(stylesFile));
+ if(styles&&z.file('word/styles.xml')){
+  const target=parse(await z.file('word/styles.xml').async('string'));
   language=fontLanguage(sourceDefaults(styles).rPr)||language;
   explicitTheme(styles,theme,language);
   defaultStyle=importedStyles(target,styles,stylePrefix);
   z.file('word/styles.xml',serialize(target));
  }
  let numOffset=0;
- if(source.files['word/numbering.xml']){const src=parse(decode(source.files['word/numbering.xml'])),target=z.file('word/numbering.xml')?parse(await z.file('word/numbering.xml').async('string')):parse('<w:numbering xmlns:w="'+W+'"/>');numOffset=1000+Math.max(0,...[...target.getElementsByTagNameNS(W,'num')].map(n=>Number(val(n,'numId'))),...[...target.getElementsByTagNameNS(W,'abstractNum')].map(n=>Number(val(n,'abstractNumId'))));for(const n of src.getElementsByTagNameNS(W,'*')){for(const key of ['numId','abstractNumId'])if(n.hasAttributeNS(W,key))n.setAttributeNS(W,'w:'+key,Number(val(n,key))+numOffset);if(['numId','abstractNumId'].includes(n.localName)&&n.hasAttributeNS(W,'val')&&(n.localName!=='numId'||val(n,'val')!=='0'))n.setAttributeNS(W,'w:val',Number(val(n,'val'))+numOffset);if(['pStyle','rStyle','styleLink','numStyleLink'].includes(n.localName))n.setAttributeNS(W,'w:val',stylePrefix+val(n,'val'));}for(const child of src.documentElement.children)target.documentElement.append(target.importNode(child,true));z.file('word/numbering.xml',serialize(target));if(![...rels.documentElement.children].some(r=>r.getAttribute('Type')===R+'/numbering')){const r=rels.createElementNS(rels.documentElement.namespaceURI,'Relationship');r.setAttribute('Id','rIdImportedNumbering');r.setAttribute('Type',R+'/numbering');r.setAttribute('Target','numbering.xml');rels.documentElement.append(r);}if(![...ct.documentElement.children].some(t=>t.getAttribute('PartName')==='/word/numbering.xml')){const t=ct.createElementNS(ct.documentElement.namespaceURI,'Override');t.setAttribute('PartName','/word/numbering.xml');t.setAttribute('ContentType','application/vnd.openxmlformats-officedocument.wordprocessingml.numbering+xml');ct.documentElement.append(t);}}
+ if(numbering?.documentElement.children.length){const src=numbering,target=z.file('word/numbering.xml')?parse(await z.file('word/numbering.xml').async('string')):parse('<w:numbering xmlns:w="'+W+'"/>');numOffset=1000+Math.max(0,...[...target.getElementsByTagNameNS(W,'num')].map(n=>Number(val(n,'numId'))),...[...target.getElementsByTagNameNS(W,'abstractNum')].map(n=>Number(val(n,'abstractNumId'))));for(const n of src.getElementsByTagNameNS(W,'*')){for(const key of ['numId','abstractNumId'])if(n.hasAttributeNS(W,key))n.setAttributeNS(W,'w:'+key,Number(val(n,key))+numOffset);if(['numId','abstractNumId'].includes(n.localName)&&n.hasAttributeNS(W,'val')&&(n.localName!=='numId'||val(n,'val')!=='0'))n.setAttributeNS(W,'w:val',Number(val(n,'val'))+numOffset);if(['pStyle','rStyle','styleLink','numStyleLink'].includes(n.localName))n.setAttributeNS(W,'w:val',stylePrefix+val(n,'val'));}for(const child of src.documentElement.children)target.documentElement.append(target.importNode(child,true));z.file('word/numbering.xml',serialize(target));if(![...rels.documentElement.children].some(r=>r.getAttribute('Type')===R+'/numbering')){const r=rels.createElementNS(rels.documentElement.namespaceURI,'Relationship');r.setAttribute('Id','rIdImportedNumbering');r.setAttribute('Type',R+'/numbering');r.setAttribute('Target','numbering.xml');rels.documentElement.append(r);}if(![...ct.documentElement.children].some(t=>t.getAttribute('PartName')==='/word/numbering.xml')){const t=ct.createElementNS(ct.documentElement.namespaceURI,'Override');t.setAttribute('PartName','/word/numbering.xml');t.setAttribute('ContentType','application/vnd.openxmlformats-officedocument.wordprocessingml.numbering+xml');ct.documentElement.append(t);}}
  if(numOffset&&z.file('word/styles.xml')){const styles=parse(await z.file('word/styles.xml').async('string'));for(const st of styles.getElementsByTagNameNS(W,'style'))if(val(st,'styleId').startsWith(stylePrefix))for(const n of st.getElementsByTagNameNS(W,'numId'))if(val(n,'val')!=='0')n.setAttributeNS(W,'w:val',Number(val(n,'val'))+numOffset);z.file('word/styles.xml',serialize(styles));}
  let drawingId=100000;
  return blocks=>blocks.map(block=>{
   const node=parse(block.xml).documentElement;
   explicitTheme(node,theme,language);
   for(const n of [node,...node.getElementsByTagName('*')]){
-   for(const a of [...n.attributes])if(a.namespaceURI===R&&ids.has(a.value))n.setAttributeNS(R,a.name,ids.get(a.value));
+   for(const a of [...n.attributes])if(relationshipAttribute(a)&&ids.has(a.value))n.setAttributeNS(a.namespaceURI,a.name,ids.get(a.value));
    if(defaultStyle&&['pStyle','rStyle','tblStyle'].includes(n.localName)&&n.namespaceURI===W&&!(n.localName==='rStyle'&&val(n,'val')===window.SOP_TEMPLATE.operationText.fullWidthStyleId))n.setAttributeNS(W,'w:val',stylePrefix+val(n,'val'));
    if(n.namespaceURI===W&&n.localName==='numId'&&numOffset&&val(n,'val')!=='0')n.setAttributeNS(W,'w:val',Number(val(n,'val'))+numOffset);
    if(n.localName==='docPr'||n.localName==='cNvPr')n.setAttribute('id',++drawingId);

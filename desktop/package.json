@@ -1,6 +1,6 @@
 {
   "name": "sop-studio-desktop",
-  "version": "0.4.32",
+  "version": "0.4.33",
   "private": true,
   "description": "离线 SOP 编写、预览与可编辑 Word 导出工具",
   "author": "SOP 工作台",
@@ -21,7 +21,7 @@
     "executableName": "SOPStudio",
     "directories": { "output": "../outputs/软件安装包", "buildResources": "build" },
     "files": ["main.cjs", "preload.cjs",
-      "project-files.cjs",
+      "project-files.cjs", "proof-files.cjs", "proof-cleanup.ps1",
       "updater.cjs",
       "update-core.cjs",
       "update-helper.cjs",

@@ -189,9 +189,13 @@ function orderedExportPages(project,layout,front){
  return ordered;
 }
 
-async function exportDocx(project,layout,front){
- await window.SOP_IMPORT.refreshBody(project);
- const ordered=orderedExportPages(project,layout,front);
+async function exportDocx(project,layout,front,proofKey){
+ const documentPages=orderedExportPages(project,layout,front);
+ const proof=proofKey?documentPages.find(entry=>entry.kind==='body'&&entry.key===proofKey):null;
+ if(proofKey&&!proof)throw Error('当前工序已变化，请重新选择校样页。');
+ const ordered=proof?[proof]:documentPages;
+ const source=proof?project.pages.find(p=>p.id===proof.page.sourceId):null;
+ await window.SOP_IMPORT.refreshBody(proof?{...project,pages:source?[source]:[]}:project);
  if(!ordered.length)throw Error('请先添加至少一张页面。');
  if(ordered.some(entry=>entry.kind==='history')&&project.history.slice(15).some(populated))throw Error('修改履历超过模板的 15 条记录。');
  for(const {page:p,kind}of ordered)if(kind==='body'){
@@ -205,7 +209,8 @@ async function exportDocx(project,layout,front){
  const [cover,history,flow,base]=children(body,'tbl');
  const [coverBreak,historyTitle,historyBreak,flowBreak,operationEnd]=children(body,'p');
  const section=first(body,'sectPr'),rels=xml(await z.file('word/_rels/document.xml.rels').async('string')),ct=xml(await z.file('[Content_Types].xml').async('string'));
- const importNodes=await window.SOP_IMPORT.exporter(project.nativeWord,z,rels,ct,d);
+ const proofBlocks=proof?window.SOP_IMPORT.bodyBlocks(proof.page):null;
+ const importNodes=await window.SOP_IMPORT.exporter(proof&&!proofBlocks?null:project.nativeWord,z,rels,ct,d,proof?proofBlocks:undefined);
  const twips=(node,key)=>Number(node?.getAttributeNS(W,key)||0);
  const tableCellWidth=(t,c)=>{
   const margins=first(first(c,'tcPr'),'tcMar')||first(first(t,'tblPr'),'tblCellMar');
@@ -313,9 +318,9 @@ async function exportDocx(project,layout,front){
   const extent=drawing.getElementsByTagNameNS('http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing','extent')[0];
   drawing.parentElement.replaceWith(await picture(value,Number(extent.getAttribute('cx'))/12700,Number(extent.getAttribute('cy'))/12700,'公司 Logo'));
  }
- await logo(cover);
+ if(!proof)await logo(cover);
  await logo(base);
- const frontCount=ordered.filter(x=>x.kind!=='body').length,operationCount=ordered.length-frontCount;
+ const frontCount=documentPages.filter(x=>x.kind!=='body').length,operationCount=documentPages.length-frontCount;
  const title=[project.meta.product,project.meta.title].filter(Boolean).join(' ');
  const confidentiality=cleanHeaderText(window.SOP_IMPORT.confidentialityText(project.settings));
  const copyright=project.settings.copyright||'';
@@ -327,14 +332,27 @@ async function exportDocx(project,layout,front){
  const headerType=[...ct.documentElement.children].find(e=>e.getAttribute('PartName')==='/word/header4.xml');
  function operationSection(number){
   const sec=section.cloneNode(true),header=xml(headerTemplate);
+  if(proof){
+   // Keep the field formatting in both Office engines. PAGE uses the actual section start;
+   // the total uses a constant formula instead of recounting the proof file.
+   const instructions=desc(header,'instrText');
+   const formula=instructions.find(node=>node.textContent.trim()==='=');
+   const subtract=instructions.find(node=>node.textContent.includes('[[FRONTPAGES]]')).parentElement;
+   for(let run=formula.parentElement.nextElementSibling;run!==subtract;){
+    const next=run.nextElementSibling;
+    run.remove();run=next;
+   }
+   subtract.remove();
+   formula.textContent='= '+operationCount+' ';
+  }
   for(const n of desc(header,'t')){
-   const tokens={'[[PAGE]]':number,'[[TOTALPAGES]]':ordered.length,'[[OPERATIONS]]':operationCount,'[[CONFIDENTIAL]]':confidentiality};
+   const tokens={'[[PAGE]]':number,'[[TOTALPAGES]]':documentPages.length,'[[OPERATIONS]]':operationCount,'[[CONFIDENTIAL]]':confidentiality};
    if(Object.hasOwn(tokens,n.textContent))n.textContent=tokens[n.textContent];
   }
   for(const n of desc(header,'instrText'))n.textContent=n.textContent.replace('[[FRONTPAGES]]',String(frontCount));
   const filename=number===1?'header-sop.xml':`header-sop-${number}.xml`;
   z.file('word/'+filename,serialize(header));
-  if(number===1){
+  if(number===1||proof){
    z.remove('word/header4.xml');header4.setAttribute('Target',filename);headerType.setAttribute('PartName','/word/'+filename);
   }else{
    const id='rIdSopHeader'+number,type=headerType.cloneNode(true);type.setAttribute('PartName','/word/'+filename);ct.documentElement.append(type);
@@ -420,7 +438,7 @@ async function exportDocx(project,layout,front){
   for(const pp of desc(t,'pPr'))for(const tag of ['keepNext','keepLines','pageBreakBefore'])for(const n of children(pp,tag))n.remove();
  }
  body.replaceChildren();
- let operation=0;
+ let operation=proof?documentPages.filter(entry=>entry.kind==='body').findIndex(entry=>entry===proof):0;
  for(const [index,entry]of ordered.entries()){
   const {kind,page}=entry;
   const t=({cover,history,flow,body:base})[kind].cloneNode(true);
@@ -455,7 +473,13 @@ async function exportDocx(project,layout,front){
  z.file('word/styles.xml',serialize(styles));
  const documentXML=serialize(d);
  z.file('word/document.xml',documentXML);
+ function removeTemplatePart(filename){
+  z.remove('word/'+filename);
+  [...rels.documentElement.children].find(node=>node.getAttribute('Target')===filename)?.remove();
+  [...ct.documentElement.children].find(node=>node.getAttribute('PartName')==='/word/'+filename)?.remove();
+ }
  for(let i=1;i<=4;i++){
+  if(proof&&i<4){removeTemplatePart('header'+i+'.xml');removeTemplatePart('footer'+i+'.xml');continue;}
   const footerPart=`word/footer${i}.xml`,footer=xml(await z.file(footerPart).async('string'));
   const [main,end]=desc(footer,'t');
   main.textContent=copyright.endsWith('。')?copyright.slice(0,-1):copyright;end.textContent=copyright.endsWith('。')?'。':'';
@@ -466,15 +490,18 @@ async function exportDocx(project,layout,front){
   desc(header,'t').at(-1).textContent=confidentiality;
   z.file(headerPart,serialize(header));
  }
+ if(proof&&![...d.getElementsByTagNameNS('http://schemas.openxmlformats.org/drawingml/2006/main','blip')].some(node=>node.getAttributeNS(R,'embed')==='rId14'))removeTemplatePart('media/image1.png');
  const settings=xml(await z.file('word/settings.xml').async('string'));
  for(const tag of ['updateFields','documentProtection','writeProtection'])for(const e of desc(settings,tag))e.remove();
  settings.documentElement.append(el(settings,'updateFields',{val:'true'}));
  z.file('word/settings.xml',serialize(settings));
- const embedded=xml('<sop-project xmlns="urn:lenfor:sop:project"/>');
- embedded.documentElement.setAttribute('documentSha256',await hashText(documentXML));
- embedded.documentElement.textContent=base64Utf8(JSON.stringify(window.SOP.projectForStorage(project)));
- z.file('customXml/sop-project.xml',serialize(embedded));
- addRelationship('rIdSopProject','customXml','../customXml/sop-project.xml');
+ if(!proof){
+  const embedded=xml('<sop-project xmlns="urn:lenfor:sop:project"/>');
+  embedded.documentElement.setAttribute('documentSha256',await hashText(documentXML));
+  embedded.documentElement.textContent=base64Utf8(JSON.stringify(window.SOP.projectForStorage(project)));
+  z.file('customXml/sop-project.xml',serialize(embedded));
+  addRelationship('rIdSopProject','customXml','../customXml/sop-project.xml');
+ }
  z.file('word/_rels/document.xml.rels',serialize(rels));
  z.file('[Content_Types].xml',serialize(ct));
  const app=xml(await z.file('docProps/app.xml').async('string'));
@@ -580,5 +607,9 @@ function convertOriginalFlow(project){
  return {model:window.SOP_OBJECTS.normalize({width,height,objects,edges}),notice:'已提取原稿 DrawingML 节点及连线，连接关系按几何位置推断，请逐条核对；'+unsupported+'个复杂或不支持对象可能简化，原稿仍独立保留。'};
 }
 async function exportOriginal(project){if(!project.nativeWord?.documentXml)throw Error('此项目没有保留原始 Word');const z=new JSZip();for(const [name,data]of Object.entries(project.nativeWord.files))z.file(name,data,{base64:true});z.file('word/document.xml',project.nativeWord.documentXml);z.file('[Content_Types].xml',project.nativeWord.types);return z.generateAsync({type:'blob',compression:'DEFLATE',mimeType:'application/vnd.openxmlformats-officedocument.wordprocessingml.document'});}
-window.SOP_WORD={flowNoteText,originalFrontBlocks,refreshOriginalCover,convertOriginalFlow,ensureOriginalFront,exportOriginal,exportDocx,operationRequirementBlocks,importDocx,legacyMissingCount,recoverMissing};
+function exportProof(project,layout,front,key){
+ if(typeof key!=='string'||!key)throw Error('请先选择要校样的工序。');
+ return exportDocx(project,layout,front,key);
+}
+window.SOP_WORD={exportProof,flowNoteText,originalFrontBlocks,refreshOriginalCover,convertOriginalFlow,ensureOriginalFront,exportOriginal,exportDocx,operationRequirementBlocks,importDocx,legacyMissingCount,recoverMissing};
 })();
