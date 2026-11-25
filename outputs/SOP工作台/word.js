@@ -77,9 +77,9 @@ function fillParagraph(p,value){
  return replacement;
 }
 function fillCell(c,value){
- const p=first(c,'p');
- fillParagraph(p,value);
+ const p=first(c,'p'),replacement=fillParagraph(p,value);
  for(const other of children(c,'p').slice(1))other.remove();
+ return replacement;
 }
 const populated=record=>Object.values(record||{}).some(value=>String(value??'').trim());
 const revisionRecords=p=>p.changeRecords||[p.changeRecord];
@@ -391,7 +391,7 @@ async function exportDocx(project,layout,front,proofKey){
    const source=importNodes(original.blocks).find(n=>n.localName==='tbl'),area=source&&cell(source,1,0);
    const blocks=area?[...area.children].filter(n=>n.localName!=='tcPr'):[];
    c.append(...(blocks.length?blocks:[para(d,'',2)]));
-  }else c.append(native.flowParagraph(project,chunk,chartSize));
+  }else c.append(native.flowParagraph(project,chunk,{...chartSize,bodyPages:layout}));
   const note=flowNoteText(project);
   fillCell(cell(t,2,0),note==='注：□表示一般操作，◇表示检查及测试。★代表关键工序，▲代表特殊工序'?note.replace('。★','。\n★'):note);
  }
@@ -399,8 +399,13 @@ async function exportDocx(project,layout,front,proofKey){
   fillCell(cell(t,0,1),title);
   fillCell(cell(t,0,3),project.meta.number);
   fillCell(cell(t,1,3),(p.name||'')+(p.isContinuation?'（续）':''));
-  fillCell(cell(t,3,0),window.SOP_TEMPLATE.operationLabel(p));
-  fillCell(cell(t,3,1),p.station);
+  const template=window.SOP_TEMPLATE,processNumber=fillCell(cell(t,3,0),template.operationLabel(p));
+  if(template.processCategory(p.processCategory)){
+   const paragraph=first(processNumber.parentNode,'pPr'),runStyle=first(processNumber,'rPr');
+   paragraph.prepend(el(d,'autoSpaceDE',{val:0}),el(d,'autoSpaceDN',{val:0}));
+   for(const size of ['sz','szCs'])first(runStyle,size).setAttributeNS(W,'w:val',template.processLabelFontSize(p)*2);
+  }
+  fillCell(cell(t,3,1),template.stationLabel(p));
   fillCell(cell(t,19,0),p.duration);
   fillCell(cell(t,19,1),p.people);
   const op=cell(t,3,2),imported=window.SOP_IMPORT.active(p);

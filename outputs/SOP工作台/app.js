@@ -100,12 +100,18 @@ function bindBodyText(input,p,key){
 }
 function textControls(p){const f=textStyle(p,'steps'),fixed=p.fixed.includes('contentStyle'),disabled=fixed?' disabled':'';return `<div class="field shared-text-format"><div class="field-top"><strong>正文文字格式</strong><button class="pin ${fixed?'pinned':''}" data-pin="contentStyle" title="只固定字号与字间距，不固定文字内容">${fixed?'● 格式已固定 · 解锁':'固定格式'}</button></div><div class="text-format-controls"><label title="单位：磅">字号<input type="number" min="6" max="36" step="0.5" data-text-format="content" data-style-key="fontSize" value="${f.fontSize}"${disabled}></label><label title="单位：磅；0 为标准字间距">字间距<input type="number" min="-1" max="10" step="0.1" data-text-format="content" data-style-key="letterSpacing" value="${f.letterSpacing}"${disabled}></label></div><small>操作步骤、工艺技术要求共用；文字内容分别固定。</small></div>`;}
 
-function blankPage(processId){return {id:uid(),processId:processId||uid(),name:'新工序',signoff:{author:'',authorDate:'',reviewer:'',reviewerDate:'',approver:'',approverDate:'',version:''},fitSinglePage:false,station:'',duration:'',people:'',steps:'',requirements:'',notes:'',photos:[],materials:[],checks:[],fixed:[]};}
+function blankPage(processId,category){return {id:uid(),processId:processId||uid(),...(category?{processCategory:category}:{}),name:'新工序',signoff:{author:'',authorDate:'',reviewer:'',reviewerDate:'',approver:'',approverDate:'',version:''},fitSinglePage:false,station:'',duration:'',people:'',steps:'',requirements:'',notes:'',photos:[],materials:[],checks:[],fixed:[]};}
 function validate(p){
  const previousState=p?.schema==='sop-studio/v1'?window.SOP_IMPORT?.projectState(p):null;
  if(p?.schema!=='sop-studio/v1'||!p.meta||!p.settings||!Array.isArray(p.pages))throw Error('这不是有效的 SOP 工作台项目文件。');
  if(p.pages.length>300)throw Error('第一版每份项目最多支持 300 张基础工序页。');
  p.pages.forEach(x=>{if(typeof x.name!=='string'||!Array.isArray(x.photos)||!Array.isArray(x.materials)||!Array.isArray(x.checks))throw Error('项目中的工序数据不完整。');for(const ph of x.photos)if(!/^data:image\/(png|jpeg|webp);base64,/.test(ph.data))throw Error('项目包含不支持的图片数据。'); if(x.canvas)x.canvas=window.SOP_OBJECTS.restorePhotoCaptions(x.canvas,x.photos);if(x.canvasDraft?.objects)x.canvasDraft=window.SOP_OBJECTS.restorePhotoCaptions(x.canvasDraft,x.photos); x.id=x.id||uid();x.processId=x.processId||uid();if(x.processLabel!==undefined)x.processLabel=String(x.processLabel??'').trim();x.fixed=Array.isArray(x.fixed)?x.fixed:[];x.steps=String(x.steps||'');x.requirements=String(x.requirements||'');x.notes=String(x.notes||'');if(x.contentStyle)x.contentStyle=textStyle(x,'steps');if(x.textStyles)x.textStyles={steps:textStyle({textStyles:x.textStyles},'steps'),requirements:textStyle({textStyles:x.textStyles},'requirements')};x.signoff=window.SOP_IMPORT.pageSignoff(x,p.meta);});
+ const numbers=T.numberProcesses(p.pages);
+ for(const page of p.pages){
+  const category=numbers.get(page.processId).processCategory;
+  if(category)page.processCategory=category;
+  else delete page.processCategory;
+ }
  if(p.settings.logo===undefined)p.settings.logo=A.logo||'';
  if(p.settings.logo&&!/^data:image\/(png|jpeg|webp);base64,/.test(p.settings.logo))throw Error('Logo 图片格式不支持，请使用 PNG、JPEG 或 WebP。');
  if(p.settings.logo?.length>16*1024*1024)throw Error('Logo 图片过大，请先缩小后再导入。');
@@ -228,15 +234,34 @@ function opHtml(p){
  return steps+operationPhotos(p.photos)+canvasText(p,'requirements')+(p.standardText?'<p>'+esc(p.standardText)+'</p>':'');
 }
 function paginateOne(p){const space=p.canvas?canvasSpace(p):null;return [{...p,...(space?{canvasHeight:space.height,canvasHeightPt:space.pixels*.75}:{}),fitSinglePage:false,fitScale:1,importedPreviewScale:1,manualSinglePage:true,sourceId:p.id,fragment:0,id:p.id+':0',standardText:window.SOP_IMPORT?.active(p)||A.layout==='wide-v2'?'':project.settings.standardText||''}];}
-function uniqueProcesses(){const ids=new Set();return project.pages.filter(p=>{if(ids.has(p.processId))return false;ids.add(p.processId);return true;});}
-function recalc(){const ids=new Map();let n=0;layout=project.pages.flatMap(p=>paginateOne(p));for(const p of layout){p.isContinuation=ids.has(p.processId);if(!ids.has(p.processId))ids.set(p.processId,++n);p.processNo=ids.get(p.processId);}front=[];if(project.settings.cover)front.push({kind:'cover'});if(project.settings.history)front.push({kind:'history'});if(project.settings.flow){const processes=flowNodes();for(let i=0;i<((project.originalFront?.flow&&project.frontContent?.flowMode!=='editable')||project.frontContent?.flowGraph?1:Math.max(1,Math.ceil(processes.length/24)));i++)front.push({kind:'flow',chunk:i});}const ordered=orderedPages();layout=ordered.filter(x=>x.kind==='body').map(x=>x.page);for(let i=0;i<layout.length;i++){layout[i].bodyNo=i+1;layout[i].pageNo=i+1;layout[i].total=layout.length;}$('#measureRoot').replaceChildren();}
+function uniqueProcesses(pages=layout){const ids=new Set();return pages.filter(p=>{if(ids.has(p.processId))return false;ids.add(p.processId);return true;});}
+function recalc(){
+ layout=project.pages.flatMap(p=>paginateOne(p));
+ front=[];
+ if(project.settings.cover)front.push({kind:'cover'});
+ if(project.settings.history)front.push({kind:'history'});
+ if(project.settings.flow){
+  const count=(project.originalFront?.flow&&project.frontContent?.flowMode!=='editable')||project.frontContent?.flowGraph?1:Math.max(1,Math.ceil(flowNodes().length/24));
+  for(let i=0;i<count;i++)front.push({kind:'flow',chunk:i});
+ }
+ layout=orderedPages().filter(entry=>entry.kind==='body').map(entry=>entry.page);
+ const numbers=T.numberProcesses(layout),seen=new Set();
+ for(const [index,page] of layout.entries()){
+  Object.assign(page,numbers.get(page.processId));
+  page.isContinuation=seen.has(page.processId);
+  seen.add(page.processId);
+  page.bodyNo=page.pageNo=index+1;
+  page.total=layout.length;
+ }
+ $('#measureRoot').replaceChildren();
+}
 function metadataTitle(){return [project.meta.product,project.meta.title].filter(Boolean).join(' ');}
 function paperChrome(inner,cls=''){return `<article class="paper ${cls}"><div class="confidential">${esc(window.SOP_IMPORT.confidentialityText(project.settings))}</div>${inner}<div class="copyright">${esc(project.settings.copyright)}</div></article>`;}
 function logoHtml(){return project.settings.showLogo!==false&&project.settings.logo?`<img src="${esc(project.settings.logo)}" alt="公司 Logo">`:'';}
 function operationPaper(p){if(A.layout==='wide-v2'){
  const canvasOverflow=p.canvas&&window.SOP_OBJECTS.contentHeight(p.canvas)>(p.canvasHeight??canvasSpace(p).height);
  return T.operationPaper(p,project,opHtml(p),canvasOverflow);
-}const m=project.meta;const mats=[...p.materials];while(mats.length<4)mats.push({});const checks=[...p.checks];while(checks.length<2)checks.push({});const sign=(name)=>esc(name)+(m.date?'<br>'+esc(m.date):'');return paperChrome(`<div class="doc-head"><div>${logoHtml()}</div><div>${esc(metadataTitle())}</div><div class="doc-fields"><div><b>工艺文件编号</b><span>${esc(m.number)}</span></div><div><b>工序作业名称</b><span>${esc(p.name)}${p.isContinuation?'（续）':''}</span></div></div><div class="doc-pages"><div>共 ${p.total} 页</div><div>第 ${p.pageNo} 页</div></div></div><div class="doc-labels"><div>工序号</div><div>工位号</div><div>工序作业内容</div><div>工装、工具、设备</div></div><div class="doc-body"><div class="doc-vertical"><div class="station-number">${esc(T.operationLabel(p))}</div><div class="station-foot"><div>工时</div><div>${esc(p.duration)}</div></div></div><div class="doc-vertical"><div class="station-number">${esc(p.station)}</div><div class="station-foot"><div>人力</div><div>${esc(p.people)}</div></div></div><div class="op-cell">${opHtml(p)}</div><div class="doc-right"><table class="doc-table materials"><colgroup><col style="width:10%"><col style="width:39%"><col style="width:34%"><col style="width:17%"></colgroup><tr><th>序号</th><th>编码＋名称</th><th>图号或规格</th><th>备注</th></tr>${mats.map((r,i)=>`<tr><td>${r.name?i+1:''}</td><td>${esc(r.name)}</td><td>${esc(r.spec)}</td><td>${esc(r.qty)}</td></tr>`).join('')}</table><table class="doc-table checks"><tr><th>序号</th><th>控制特性</th><th>技术要求</th><th>生产自检</th><th>质量抽检</th><th>重要度</th><th>管理手段</th></tr>${checks.map((r,i)=>`<tr><td>${r.feature?i+1:''}</td><td>${esc(r.feature)}</td><td>${esc(r.standard)}</td><td>${esc(r.self)}</td><td>${esc(r.audit)}</td><td>${esc(r.importance)}</td><td>${esc(r.method)}</td></tr>`).join('')}</table><div class="doc-notes">备注：${esc(p.notes)}</div><div class="doc-legend">${esc(project.settings.importance)}</div><div class="doc-legend">${esc(project.settings.management)}</div></div></div><div class="doc-sign"><div class="revision-box"><span>序号</span><span>标记</span><span>处数</span><span>更改文件号</span><span>签字（日期）</span></div><div><table class="sign-table"><tr><td>编制（日期）</td><td>审核（日期）</td><td>批准（日期）</td><td>版本号</td></tr><tr><td>${sign(m.author)}</td><td>${sign(m.reviewer)}</td><td>${sign(m.approver)}</td><td>${esc(m.version)}</td></tr></table></div></div>`);}
+}const m=project.meta;const mats=[...p.materials];while(mats.length<4)mats.push({});const checks=[...p.checks];while(checks.length<2)checks.push({});const sign=(name)=>esc(name)+(m.date?'<br>'+esc(m.date):'');return paperChrome(`<div class="doc-head"><div>${logoHtml()}</div><div>${esc(metadataTitle())}</div><div class="doc-fields"><div><b>工艺文件编号</b><span>${esc(m.number)}</span></div><div><b>工序作业名称</b><span>${esc(p.name)}${p.isContinuation?'（续）':''}</span></div></div><div class="doc-pages"><div>共 ${p.total} 页</div><div>第 ${p.pageNo} 页</div></div></div><div class="doc-labels"><div>工序号</div><div>工位号</div><div>工序作业内容</div><div>工装、工具、设备</div></div><div class="doc-body"><div class="doc-vertical"><div class="station-number">${esc(T.operationLabel(p))}</div><div class="station-foot"><div>工时</div><div>${esc(p.duration)}</div></div></div><div class="doc-vertical"><div class="station-number">${esc(T.stationLabel(p))}</div><div class="station-foot"><div>人力</div><div>${esc(p.people)}</div></div></div><div class="op-cell">${opHtml(p)}</div><div class="doc-right"><table class="doc-table materials"><colgroup><col style="width:10%"><col style="width:39%"><col style="width:34%"><col style="width:17%"></colgroup><tr><th>序号</th><th>编码＋名称</th><th>图号或规格</th><th>备注</th></tr>${mats.map((r,i)=>`<tr><td>${r.name?i+1:''}</td><td>${esc(r.name)}</td><td>${esc(r.spec)}</td><td>${esc(r.qty)}</td></tr>`).join('')}</table><table class="doc-table checks"><tr><th>序号</th><th>控制特性</th><th>技术要求</th><th>生产自检</th><th>质量抽检</th><th>重要度</th><th>管理手段</th></tr>${checks.map((r,i)=>`<tr><td>${r.feature?i+1:''}</td><td>${esc(r.feature)}</td><td>${esc(r.standard)}</td><td>${esc(r.self)}</td><td>${esc(r.audit)}</td><td>${esc(r.importance)}</td><td>${esc(r.method)}</td></tr>`).join('')}</table><div class="doc-notes">备注：${esc(p.notes)}</div><div class="doc-legend">${esc(project.settings.importance)}</div><div class="doc-legend">${esc(project.settings.management)}</div></div></div><div class="doc-sign"><div class="revision-box"><span>序号</span><span>标记</span><span>处数</span><span>更改文件号</span><span>签字（日期）</span></div><div><table class="sign-table"><tr><td>编制（日期）</td><td>审核（日期）</td><td>批准（日期）</td><td>版本号</td></tr><tr><td>${sign(m.author)}</td><td>${sign(m.reviewer)}</td><td>${sign(m.approver)}</td><td>${esc(m.version)}</td></tr></table></div></div>`);}
 function flowNodes(){return project.frontContent?.flowManual?String(project.frontContent.flowText||'').split('\n').filter(x=>x.trim()).map(name=>({name})):uniqueProcesses().filter(p=>p.name.trim());}
 function flowImage(chunk=0){const all=flowNodes(),ps=all.slice(chunk*24,chunk*24+24),c=document.createElement('canvas');c.width=1500;c.height=850;const ctx=c.getContext('2d');ctx.fillStyle='white';ctx.fillRect(0,0,c.width,c.height);ctx.strokeStyle='#333';ctx.fillStyle='#111';ctx.lineWidth=2;ctx.font='22px Microsoft YaHei';const rows=Math.min(8,Math.max(1,ps.length)),colWidth=460,boxW=380,boxH=58,dy=96;
  if(ps.length)ctx.translate((c.width-(Math.ceil(ps.length/8)-1)*colWidth-boxW)/2-45,(c.height-(rows-1)*dy-boxH)/2-35);
@@ -462,7 +487,7 @@ function moveDocumentPage(from,to,swap=false,{groupProcesses=false}={}){
  for(const entry of order)if(entry.kind==='body'){
   const page=clone(entry.page);
   page.id=page.fragment?uid():page.sourceId;
-  for(const key of ['sourceId','fragment','bodyNo','pageNo','total','processNo','standardText','isContinuation'])delete page[key];
+  for(const key of ['sourceId','fragment','bodyNo','pageNo','total','processNo','stationNo','standardText','isContinuation'])delete page[key];
   entry.page=page;
   entry.key='body:'+page.id+':0';
  }
@@ -479,7 +504,7 @@ function moveDocumentPage(from,to,swap=false,{groupProcesses=false}={}){
 }
 function moveRenderedPage(from,to,swap=false){recalc();const all=orderedPages();moveDocumentPage(all.findIndex(x=>x.kind==='body'&&x.page===layout[from]),all.findIndex(x=>x.kind==='body'&&x.page===layout[to]),swap);}
 function openMovePage(){recalc();const all=orderedPages();if(all.length<2)return;const current=Math.max(0,selectedDocumentIndex()),options=value=>all.map((entry,i)=>'<option value="'+i+'" '+(i===value?'selected':'')+'>全文第 '+(i+1)+' 页 · '+esc(entry.kind==='body'?entry.page.name:frontNames[entry.kind])+'</option>').join('');showForm('调整页面顺序','<div class="notice">封面、履历、流程图和工序页均可任意移动或交换。</div><div class="form-grid"><label class="wide"><span>调整方式</span><select id="moveMode"><option value="move">移动到目标位置</option><option value="swap">与目标页面交换</option></select></label><label class="wide"><span>要移动的页面</span><select id="moveSource">'+options(current)+'</select></label><label class="wide"><span>移动后的最终位置</span><select id="moveDestination">'+options(current)+'</select></label></div>',()=>moveDocumentPage(Number($('#moveSource').value),Number($('#moveDestination').value),$('#moveMode').value==='swap'));$('#dialogApply').textContent='移动并更新页码';}
-function materialize(index){snapshot();const all=orderedPages(),chosen=layout[index];for(const entry of all)if(entry.kind==='body'){const x=clone(entry.page);x.id=x.fragment?uid():x.sourceId;if(entry.page===chosen)selected=x.id;for(const k of ['sourceId','fragment','bodyNo','pageNo','total','processNo','standardText','isContinuation'])delete x[k];entry.page=x;entry.key='body:'+x.id+':0';}project.pages=all.filter(x=>x.kind==='body').map(x=>x.page);project.pageOrder=all.map(x=>x.key);changed();}
+function materialize(index){snapshot();const all=orderedPages(),chosen=layout[index];for(const entry of all)if(entry.kind==='body'){const x=clone(entry.page);x.id=x.fragment?uid():x.sourceId;if(entry.page===chosen)selected=x.id;for(const k of ['sourceId','fragment','bodyNo','pageNo','total','processNo','stationNo','standardText','isContinuation'])delete x[k];entry.page=x;entry.key='body:'+x.id+':0';}project.pages=all.filter(x=>x.kind==='body').map(x=>x.page);project.pageOrder=all.map(x=>x.key);changed();}
 function refreshRecovery(){
  let box=$('#legacyRecoveryNotice');if(!box){box=document.createElement('div');box.id='legacyRecoveryNotice';box.className='notice';$('.editor').insertBefore(box,$('.editor-heading'));}
  const count=window.SOP_WORD?.legacyMissingCount(project)||0;box.hidden=!count;
@@ -633,8 +658,13 @@ function editProcessNumber(){
   renderEditor();
  }
  const input=$('#processLabelInput');
+ if(input?.readOnly){$('#processCategoryInput').focus();return;}
  input?.focus();
  input?.select();
+}
+function processCategoryOptions(category){
+ return '<option value="">沿用原编号</option>'+Object.entries(T.processCategories)
+  .map(([code,label])=>'<option value="'+code+'"'+(code===category?' selected':'')+'>'+label+'（'+code+'）</option>').join('');
 }
 function processNumberWarning(action=false){
  return '<div class="process-number-warning" id="processNumberWarning" hidden>'+
@@ -644,6 +674,17 @@ function processNumberWarning(action=false){
 function refreshProcessNumberWarning(current=layout.find(page=>page.sourceId===selected)){
  const box=$('#processNumberWarning');
  if(!box)return;
+ const category=$('#processCategoryInput');
+ if(category&&current){
+  const automatic=!!category.value;
+  const operation=$('#processLabelInput'),station=$('[data-meta="station"]');
+  operation.readOnly=station.readOnly=automatic;
+  if(automatic&&current.processCategory===category.value){
+   operation.value=T.operationLabel(current);
+   station.value=T.stationLabel(current);
+  }
+  $('#processCategoryHint').hidden=!automatic;
+ }
  const label=current&&T.operationLabel(current);
  const others=new Map();
  for(const candidate of layout){
@@ -658,14 +699,28 @@ function refreshProcessNumberWarning(current=layout.find(page=>page.sourceId===s
  if(text.textContent!==message)text.textContent=message;
 }
 function renderEditor(){if(String(selected).startsWith('front:'))return renderFrontEditor(selected.split(':')[1]);$('.tabs').hidden=false;const p=page();const e=$('#editContent');if(!p){$('#editorTitle').textContent='开始编写 SOP';$('#selectedContext').textContent='';e.innerHTML='<div class="empty-state">点击“新增工序页”，或导入已有 Word / SOP 项目。</div>';return;}$('#editorTitle').textContent=p.name||'未命名工序';$('#selectedContext').textContent='正文工序 · '+(p.fixed.length?p.fixed.length+' 项固定沿用':'内容可编辑');const locked=k=>p.fixed.includes(k)?' readonly':'';
- if(tab==='content'){e.innerHTML=`<div class="field"><label><span>工序名称</span><input id="nameInput" value="${esc(p.name)}"></label></div><div class="field"><label><span>工序号</span><input id="processLabelInput" value="${esc(p.processLabel)}" placeholder="留空自动编号" aria-describedby="processNumberMessage"></label>${processNumberWarning()}</div><div class="field field-grid"><label><span>工位号</span><input data-meta="station" value="${esc(p.station)}"></label><label><span>工时</span><input data-meta="duration" value="${esc(p.duration)}"></label><label><span>人力</span><input data-meta="people" value="${esc(p.people)}"></label></div>${textControls(p)}<div class="field">${fieldTop('操作步骤','steps')}<textarea id="stepsInput" rows="7" style="font-size:${textStyle(p,'steps').fontSize}pt;letter-spacing:${textStyle(p,'steps').letterSpacing}pt"${locked('steps')}>${esc(p.steps)}</textarea>${p.fixed.includes('steps')?'':highlightControls('steps')}</div><div class="field">${fieldTop('作业配图','photos')}<div class="photo-grid" id="photoGrid"></div>${p.fixed.includes('photos')?'':'<div class="field-note">可多选上传，也可以将截图粘贴到此页面。配图按两列排列；超出页面或发生遮挡时，请手动调整。</div><button id="uploadBtn">＋ 添加照片 / 截图</button>'}</div><div class="field">${fieldTop('工艺技术要求 / 验收要点','requirements')}<textarea id="requirementsInput" rows="3" style="font-size:${textStyle(p,'requirements').fontSize}pt;letter-spacing:${textStyle(p,'requirements').letterSpacing}pt"${locked('requirements')}>${esc(p.requirements)}</textarea>${p.fixed.includes('requirements')?'':highlightControls('requirements')}</div>`;
+ if(tab==='content'){e.innerHTML=`<div class="field"><label><span>工序名称</span><input id="nameInput" value="${esc(p.name)}"></label></div>
+  <div class="field"><div class="process-category-row"><label><span>工序类别</span><select id="processCategoryInput" aria-describedby="processCategoryHint">${processCategoryOptions(p.processCategory)}</select></label><button type="button" id="batchProcessNumbers">批量归类</button></div><small id="processCategoryHint" hidden>工序号与工位号自动更新。选择「沿用原编号」可恢复原值。</small></div>
+  <div class="field"><label><span>工序号</span><input id="processLabelInput" value="${esc(p.processLabel)}" placeholder="留空自动编号" aria-describedby="processNumberMessage"></label>${processNumberWarning()}</div>
+  <div class="field field-grid"><label><span>工位号</span><input data-meta="station" value="${esc(p.station)}"></label><label><span>工时</span><input data-meta="duration" value="${esc(p.duration)}"></label><label><span>人力</span><input data-meta="people" value="${esc(p.people)}"></label></div>${textControls(p)}<div class="field">${fieldTop('操作步骤','steps')}<textarea id="stepsInput" rows="7" style="font-size:${textStyle(p,'steps').fontSize}pt;letter-spacing:${textStyle(p,'steps').letterSpacing}pt"${locked('steps')}>${esc(p.steps)}</textarea>${p.fixed.includes('steps')?'':highlightControls('steps')}</div><div class="field">${fieldTop('作业配图','photos')}<div class="photo-grid" id="photoGrid"></div>${p.fixed.includes('photos')?'':'<div class="field-note">可多选上传，也可以将截图粘贴到此页面。配图按两列排列；超出页面或发生遮挡时，请手动调整。</div><button id="uploadBtn">＋ 添加照片 / 截图</button>'}</div><div class="field">${fieldTop('工艺技术要求 / 验收要点','requirements')}<textarea id="requirementsInput" rows="3" style="font-size:${textStyle(p,'requirements').fontSize}pt;letter-spacing:${textStyle(p,'requirements').letterSpacing}pt"${locked('requirements')}>${esc(p.requirements)}</textarea>${p.fixed.includes('requirements')?'':highlightControls('requirements')}</div>`;
 
   $$('[data-text-format]').forEach(el=>{el.onfocus=()=>snapshot();el.oninput=()=>{if(p.fixed.includes('contentStyle'))return;p.contentStyle={...textStyle(p,'steps'),[el.dataset.styleKey]:el.value};p.contentStyle=textStyle(p,'steps');for(const key of ['steps','requirements']){const input=$('#'+key+'Input');input.style.fontSize=p.contentStyle.fontSize+'pt';input.style.letterSpacing=p.contentStyle.letterSpacing+'pt';}changed();};el.onchange=()=>{el.value=textStyle(p,'steps')[el.dataset.styleKey];};});
   bindInput($('#nameInput'),v=>{p.name=v;project.pages.filter(x=>x.processId===p.processId).forEach(x=>x.name=v);$('#editorTitle').textContent=v;});
   bindInput($('#processLabelInput'),value=>{
    for(const page of project.pages)if(page.processId===p.processId)page.processLabel=value.trim();
   },{snapshotOnEdit:true});
-  $$('[data-meta]').forEach(el=>bindInput(el,v=>p[el.dataset.meta]=v));for(const [id,k] of [['stepsInput','steps'],['requirementsInput','requirements']])bindBodyText($('#'+id),p,k);
+  $('#processCategoryInput').onchange=event=>{
+   snapshot();
+   setProcessCategory(p.processId,event.target.value);
+   if(!event.target.value){
+    $('#processLabelInput').value=p.processLabel??'';
+    $('[data-meta="station"]').value=p.station??'';
+   }
+   changed();
+   refresh();
+  };
+  $('#batchProcessNumbers').onclick=openBatchProcessNumbers;
+  $$('[data-meta]').forEach(el=>bindInput(el,v=>p[el.dataset.meta]=v,{snapshotOnEdit:el.dataset.meta==='station'}));for(const [id,k] of [['stepsInput','steps'],['requirementsInput','requirements']])bindBodyText($('#'+id),p,k);
   if(window.SOP_IMPORT?.active(p)){e.insertAdjacentHTML('afterbegin','<div class="notice">当前页保留原稿图文及可编辑标注。未改动项目导出 Word 时保留原文档分页；段内文字可沿用原 Word 格式。增删段落、调整样式或修改配图后会重新编排，可用撤销恢复。浏览器按工序表格预览，物理页数请在 Word/WPS 中核对。</div>');}
   e.insertAdjacentHTML('afterbegin','<div class="canvas-entry"><strong>图文页面画布</strong><p>照片、文字框与箭头独立摆放，支持照片外留白。</p><button id="editPageCanvas" class="primary">'+(p.canvas?'编辑页面画布':'建立页面画布')+'</button></div>');$('#editPageCanvas').disabled=p.fixed.includes('photos');$('#editPageCanvas').onclick=()=>void openPageCanvas(p);if(p.canvas){e.insertAdjacentHTML('afterbegin','<div class="notice">本页使用独立对象画布。下方显示画布中的照片，可进入画布编辑。<button id="restorePageMaterials">返回原图文排版</button></div>');$('#restorePageMaterials').onclick=()=>{snapshot();p.canvasDraft=p.canvas;delete p.canvas;renderEditor();changed();refresh();};}
   if(p.importedContent&&!window.SOP_IMPORT.active(p))e.insertAdjacentHTML('afterbegin','<div class="notice">当前页为重排副本。无法直接转换的原图文/标注仍保存在项目的原稿中，可撤销或导出原始 Word 查阅。</div>');renderPhotos();if($('#uploadBtn')){
@@ -791,7 +846,107 @@ async function addPhotos(files){
 }
 async function prepareImages(candidate=project){if(!candidate.nativeWord&&candidate.frontContent?.flowManual&&!candidate.frontContent?.flowGraph){const c=candidate.frontContent||{},source=c.flowManual?String(c.flowText||'').split('\n').filter(Boolean).map((name,i)=>({name,processId:String(i)})):candidate.pages;if(source.length<=24)candidate.frontContent={...c,flowGraph:window.SOP_OBJECTS.fromProcesses(source),flowMode:'editable'};}if(window.SOP_WORD?.ensureOriginalFront)await window.SOP_WORD.ensureOriginalFront(candidate);await window.SOP_IMPORT.refreshBody(candidate);await prepareOperationImages(candidate.pages);}
 async function prepareOperationImages(pages){for(const p of pages)for(const ph of p.photos){if(!ph.width||!ph.height){const im=await loadImage(ph.data);ph.width=im.naturalWidth;ph.height=im.naturalHeight;}if(ph.marks?.length)ph.rendered=await annotated(ph);else if(ph.rendered===ph.data)delete ph.rendered;}}
-function showForm(title,html,apply){$('#dialogTitle').textContent=title;$('#dialogBody').innerHTML=html;$('#dialogApply').hidden=!apply;$('#dialogApply').textContent='保存';$('#dialogApply').onclick=()=>{try{apply?.();$('#formDialog').close();}catch(e){toast(e.message,true);}};$('#formDialog').showModal();}
+function showForm(title,html,apply){$('#dialogTitle').textContent=title;$('#dialogBody').innerHTML=html;$('#dialogApply').hidden=!apply;$('#dialogApply').disabled=false;$('#dialogApply').textContent='保存';$('#dialogApply').onclick=()=>{try{apply?.();$('#formDialog').close();}catch(e){toast(e.message,true);}};$('#formDialog').showModal();}
+function openBatchProcessNumbers(){
+ recalc();
+ const sourceById=new Map(project.pages.map(page=>[page.id,page]));
+ const groups=new Map();
+ for(const page of layout){
+  if(!groups.has(page.processId))groups.set(page.processId,[]);
+  groups.get(page.processId).push(page);
+ }
+ const rows=[...groups].map(([id,pages])=>({id,pages,name:pages[0].name||'未命名工序',category:pages[0].processCategory||''}));
+ const numberPair=pages=>[...new Set(pages.map(page=>T.operationLabel(page)+' ／ '+(T.stationLabel(page)||'—')))].join('\n');
+ let changes=new Map();
+ showForm('批量归类与编号',`<div class="batch-process-form">
+  <p class="notice">可逐行选择类别，或勾选多道工序后统一设为同一类别。旧手填编号保留在项目中，切回「沿用原编号」即可恢复。</p>
+  <div class="row batch-process-actions">
+   <button type="button" id="detectBatchCategories">识别旧工序号</button>
+   <select id="batchSharedCategory" aria-label="为勾选工序设置类别">${processCategoryOptions('')}</select>
+   <button type="button" id="assignBatchCategory" disabled>设置勾选项</button>
+  </div>
+  <div class="batch-process-scroll"><table class="batch-process-table">
+   <thead><tr><th scope="col"><input type="checkbox" id="selectAllBatchProcesses" aria-label="勾选全部工序"></th><th scope="col">工序名称</th><th scope="col">当前工序号 ／ 工位号</th><th scope="col">工序类别</th><th scope="col">应用后工序号 ／ 工位号</th></tr></thead>
+   <tbody>${rows.map((row,index)=>`<tr>
+    <td><input type="checkbox" data-batch-process="${index}" aria-label="勾选 ${esc(row.name)}"></td>
+    <th scope="row">${esc(row.name)}</th>
+    <td class="batch-process-number">${esc(numberPair(row.pages))}</td>
+    <td><select data-batch-category="${index}" aria-label="${esc(row.name)} 的工序类别">${processCategoryOptions(row.category)}</select></td>
+    <td class="batch-process-number"><div data-batch-preview="${index}"></div><small class="batch-process-conflicts" data-batch-conflicts="${index}"></small></td>
+   </tr>`).join('')}</tbody>
+  </table></div>
+  <p id="batchProcessStatus" role="status"></p>
+ </div>`,()=>{
+  if(!changes.size)return;
+  snapshot();
+  for(const [id,category] of changes)setProcessCategory(id,category);
+  renderEditor();
+  changed();
+  refresh();
+ });
+ const apply=$('#dialogApply'),selectAll=$('#selectAllBatchProcesses');
+ const inputs=$$('[data-batch-category]'),boxes=$$('[data-batch-process]');
+ const previews=$$('[data-batch-preview]'),warnings=$$('[data-batch-conflicts]');
+ const updateChecks=()=>{
+  const count=boxes.filter(box=>box.checked).length;
+  selectAll.checked=count===boxes.length;
+  selectAll.indeterminate=count>0&&count<boxes.length;
+  $('#assignBatchCategory').disabled=!count;
+ };
+ const updatePreview=(message='')=>{
+  changes=new Map(rows.map((row,index)=>[row.id,inputs[index].value]).filter(([,category],index)=>category!==rows[index].category));
+  const projected=layout.map(page=>{
+   const source=sourceById.get(page.sourceId);
+   return {...source,processCategory:changes.get(page.processId)??page.processCategory};
+  });
+  const numbers=T.numberProcesses(projected);
+  const projectedById=new Map(projected.map(page=>[page.id,{...page,...numbers.get(page.processId)}]));
+  const numberKeys=page=>[[T.operationLabel(page),'工序号'],[T.stationLabel(page),'工位号']]
+   .map(([value,label])=>[String(value??'').trim(),label]).filter(([value])=>value)
+   .map(([value,label])=>label+'「'+value+'」');
+  const owners=new Map();
+  for(const page of projectedById.values())for(const key of numberKeys(page)){
+   if(!owners.has(key))owners.set(key,new Set());
+   owners.get(key).add(page.processId);
+  }
+  const conflicts=new Set([...owners].filter(([,ids])=>ids.size>1).map(([key])=>key));
+  for(const [index,row] of rows.entries()){
+   const pages=row.pages.map(page=>projectedById.get(page.sourceId));
+   const result=numberPair(pages);
+   const duplicates=[...new Set(pages.flatMap(numberKeys))].filter(key=>conflicts.has(key));
+   previews[index].textContent=result;
+   previews[index].parentElement.classList.toggle('batch-process-changed',result!==numberPair(row.pages));
+   warnings[index].textContent=duplicates.length?duplicates.join('、')+'重复。':'';
+  }
+  apply.disabled=!changes.size;
+  $('#batchProcessStatus').textContent=[
+   message,changes.size?'将更新 '+changes.size+' 道工序的类别。':'选择类别后可预览编号。',
+   conflicts.size?'预览中有 '+conflicts.size+' 个重号。':''
+  ].filter(Boolean).join(' ');
+ };
+ apply.textContent='应用编号';
+ selectAll.onchange=()=>{for(const box of boxes)box.checked=selectAll.checked;updateChecks();};
+ for(const box of boxes)box.onchange=updateChecks;
+ for(const input of inputs)input.onchange=()=>updatePreview();
+ $('#assignBatchCategory').onclick=()=>{
+  for(const [index,box] of boxes.entries())if(box.checked)inputs[index].value=$('#batchSharedCategory').value;
+  updatePreview();
+ };
+ $('#detectBatchCategories').onclick=()=>{
+  let count=0;
+  for(const [index,row] of rows.entries()){
+   if(row.category||inputs[index].value)continue;
+   const candidates=new Set(row.pages.map(page=>{
+    const raw=String(sourceById.get(page.sourceId).processLabel??'').normalize('NFKC').trim();
+    const label=raw.replace(/^\d+\s*[-.、]?\s*/,'');
+    return Object.keys(T.processCategories).find(code=>T.processCategories[code]===label);
+   }).filter(Boolean));
+   if(candidates.size===1){inputs[index].value=candidates.values().next().value;count++;}
+  }
+  updatePreview(count?`识别到 ${count} 道工序。`:'没有识别到可补充的工序类别。');
+ };
+ updatePreview();
+}
 function editMetadata(){const fields=coverMetaFields;showForm('文档信息',`<div class="notice">这些信息只填写一次，所有页面同步更新。公司名称和 Logo 可在“固定格式”中修改。</div><div class="form-grid">${fields.map(([k,l])=>`<label><span>${l}</span><input data-docmeta="${k}" value="${esc(project.meta[k])}"></label>`).join('')}</div><div class="section-gap"><div class="field-top"><strong>本次修改履历</strong></div><input id="historySummary" placeholder="可选：填写本次修改内容，保存后加入修改履历"></div>`,()=>{const summary=$('#historySummary').value.trim();if(summary&&project.history.length>=T.historyRows)throw Error('当前修改履历页最多 '+T.historyRows+' 条，请先在项目中归档旧记录。');snapshot();$$('[data-docmeta]').forEach(el=>project.meta[el.dataset.docmeta]=el.value);if(summary){project.history.push({date:project.meta.date||new Date().toLocaleDateString('sv-SE'),number:project.meta.number,version:project.meta.version,summary,author:project.meta.author,reviewer:project.meta.reviewer,approver:project.meta.approver});}changed();refresh();});}
 function editSettings(){const s=project.settings,reference=window.SOP_REFERENCE?.defaults;let pendingLogo=s.logo||'';
  showForm('固定格式与沿用内容',`<div class="notice">公司信息与 Logo 会同步用于封面、预览和导出。设置随当前 SOP 保存，新建时继续沿用。</div><div class="form-grid"><label class="wide"><span>公司名称</span><input data-setting="company" maxlength="100" value="${esc(s.company)}"></label><div class="wide logo-setting"><span>公司 Logo</span><div class="logo-preview"><img id="settingsLogo" alt="Logo 预览" ${pendingLogo?'src="'+esc(pendingLogo)+'"':'hidden'}><span id="logoEmpty" ${pendingLogo?'hidden':''}>尚未设置 Logo</span></div><div class="row"><button type="button" id="chooseLogo">上传 / 更换 Logo</button><button type="button" id="removeLogo">移除 Logo</button>${reference?'<button type="button" id="resetBranding">填入原稿公司格式</button>':''}</div><input id="logoFile" type="file" accept="image/png,image/jpeg,image/webp" hidden><small>PNG、JPEG 或 WebP，支持透明背景；保持原比例放入原版式。</small></div><label class="check wide"><input type="checkbox" data-setting="showLogo" ${s.showLogo!==false?'checked':''}><span>在 SOP 中显示 Logo</span></label><label class="wide"><span>保密等级</span><select data-setting="confidentialLevel"><option value="" disabled ${!window.SOP_IMPORT.confidentialityLevel(s)?'selected':''}>请选择保密等级</option>${['绝密','机密','一般'].map(level=>`<option value="${level}" ${window.SOP_IMPORT.confidentialityLevel(s)===level?'selected':''}>${level}</option>`).join('')}</select><small>单选后自动生成 SOP 页眉中的保密等级文字。</small></label><label class="wide"><span>页脚版权声明</span><textarea data-setting="copyright" rows="2">${esc(s.copyright)}</textarea></label><label class="check"><input type="checkbox" data-setting="cover" ${s.cover?'checked':''}><span>包含封面</span></label><label class="check"><input type="checkbox" data-setting="history" ${s.history?'checked':''}><span>包含修改履历</span></label><label class="check"><input type="checkbox" data-setting="flow" ${s.flow?'checked':''}><span>包含顺序流程图</span></label><label><span>正文页码统计规则</span><select data-setting="numbering"><option value="body" ${s.numbering==='body'?'selected':''}>仅工序页计数（其他页面不计入）</option></select></label></div>`,()=>{
@@ -808,6 +963,14 @@ function editSettings(){const s=project.settings,reference=window.SOP_REFERENCE?
  $('#chooseLogo').onclick=()=>$('#logoFile').click();$('#removeLogo').onclick=()=>{pendingLogo='';updateLogo();};
  $('#logoFile').onchange=async e=>{const f=e.target.files[0];if(!f)return;const apply=$('#dialogApply');apply.disabled=true;try{if(!/^image\/(png|jpeg|webp)$/.test(f.type)||f.size>10*1024*1024)throw Error('请选择 10MB 以内的 PNG、JPEG 或 WebP 图片。');const data=await new Promise((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(r.result);r.onerror=()=>reject(Error('Logo 读取失败'));r.readAsDataURL(f);}),im=await loadImage(data);if(im.width*im.height>40000000)throw Error('Logo 分辨率过大，请缩小后上传。');const scale=Math.min(1,1600/Math.max(im.width,im.height)),c=document.createElement('canvas');c.width=Math.max(1,Math.round(im.width*scale));c.height=Math.max(1,Math.round(im.height*scale));c.getContext('2d').drawImage(im,0,0,c.width,c.height);pendingLogo=c.toDataURL('image/png');updateLogo();}catch(err){toast(err.message,true);}finally{apply.disabled=false;e.target.value='';}};
 }
+function setProcessCategory(processId,value){
+ const category=T.processCategory(value);
+ for(const page of project.pages){
+  if(page.processId!==processId)continue;
+  if(category)page.processCategory=category;
+  else delete page.processCategory;
+ }
+}
 function copyPage(){
  const original=page();
  if(!original)return;
@@ -823,9 +986,9 @@ function copyPage(){
  renderEditor();
  changed();
  refresh();
- editProcessNumber();
+ if(!copy.processCategory)editProcessNumber();
 }
-function addPage(continuation=false){const old=page();snapshot();const p=blankPage(continuation?old?.processId:undefined);if(old){if(continuation){p.name=old.name;if(old.processLabel!==undefined)p.processLabel=old.processLabel;p.station=old.station;p.signoff=clone(old.signoff);}for(const k of old.fixed||[]){if(k==='contentStyle'){p.contentStyle=clone(textStyle(old,'steps'));}else p[k]=clone(old[k]);if(k==='steps'||k==='requirements'){for(const kind of ['Highlights','TextColors'])if(old[k+kind])p[k+kind]=clone(old[k+kind]);}}p.fixed=[...(old.fixed||[])];const i=project.pages.indexOf(old);project.pages.splice(i+1,0,p);}else project.pages.push(p);
+function addPage(continuation=false){const old=page();snapshot();const p=blankPage(continuation?old?.processId:undefined,old?.processCategory);if(old){if(continuation){p.name=old.name;if(old.processLabel!==undefined)p.processLabel=old.processLabel;p.station=old.station;p.signoff=clone(old.signoff);}for(const k of old.fixed||[]){if(k==='contentStyle'){p.contentStyle=clone(textStyle(old,'steps'));}else p[k]=clone(old[k]);if(k==='steps'||k==='requirements'){for(const kind of ['Highlights','TextColors'])if(old[k+kind])p[k+kind]=clone(old[k+kind]);}}p.fixed=[...(old.fixed||[])];const i=project.pages.indexOf(old);project.pages.splice(i+1,0,p);}else project.pages.push(p);
  if(project.signoffDefault){
   p.signoff=clone(project.signoffDefault);
   if(!p.fixed.includes('signoff'))p.fixed.push('signoff');

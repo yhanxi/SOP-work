@@ -9,6 +9,25 @@
 .process-number-warning{margin:8px 0 0;padding:8px 10px;border:1px solid #ebcf8e;border-radius:6px;background:#fff7e5;color:#78510e;font-size:12px;line-height:1.5;overflow-wrap:anywhere}
 #editContent>.process-number-warning{margin:0 0 14px}
 .process-number-warning button{display:block;margin-top:6px;padding:4px 8px;font-size:12px}
+.process-category-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:end}
+.process-category-row button{min-height:40px}
+#processCategoryHint:not([hidden]){display:block;margin-top:6px}
+#formDialog:has(.batch-process-form){width:min(880px,94vw)}
+.batch-process-form .notice{margin:0 0 14px}
+.batch-process-actions{margin:0 0 14px}
+.batch-process-actions select{width:auto}
+.batch-process-scroll{overflow:auto;max-height:44vh;border:1px solid var(--line);border-radius:7px}
+.batch-process-table{width:100%;min-width:580px;border-collapse:separate;border-spacing:0;font-size:13px}
+.batch-process-table th,.batch-process-table td{padding:8px 10px;border-bottom:1px solid var(--line);text-align:left}
+.batch-process-table thead th{position:sticky;top:0;background:var(--soft);z-index:1}
+.batch-process-table tbody th{font-weight:500;overflow-wrap:anywhere}
+.batch-process-table th:first-child,.batch-process-table td:first-child{width:40px;text-align:center}
+.batch-process-table input[type=checkbox]{width:auto;margin:0;accent-color:var(--blue)}
+.batch-process-table select{min-width:108px;padding:6px}
+.batch-process-number{white-space:pre-line;overflow-wrap:anywhere}
+.batch-process-changed{background:var(--selected);font-weight:600}
+.batch-process-conflicts:not(:empty){display:block;margin-top:3px;color:#78510e;font-weight:400}
+#batchProcessStatus{margin:12px 0 0;font-size:12px;color:var(--muted)}
 
 .logo-setting>span{display:block;margin-bottom:8px;font-size:12px}.logo-preview{height:100px;padding:12px;border:1px solid #d9e1e4;border-radius:7px;margin-bottom:10px;display:flex;align-items:center;justify-content:center;background:#f7f9fa}.logo-preview img{max-width:100%;max-height:76px;object-fit:contain}.logo-setting small{display:block;margin-top:8px}.doc-head img{max-height:15mm;object-fit:contain}.cover-top img{max-width:100%;max-height:16mm;object-fit:contain}
 .annotation-tools label{display:flex;align-items:center;gap:5px;font-size:12px}.annotation-tools label input[type=checkbox]{width:auto}.annotation-tools select{width:auto;padding:7px}.annotation-tools label input[type=color]{flex-shrink:0}
@@ -171,6 +190,10 @@
  text-align: center;
  font-size: 9pt;
  border-right: var(--rule);
+}
+.reference-station[style] > [data-print-target="processLabel"] {
+ font-size: var(--process-number-size);
+ text-autospace: no-autospace;
 }
 .reference-station-foot {
  display: grid;

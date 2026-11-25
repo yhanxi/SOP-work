@@ -94,7 +94,7 @@ function create(doc,{nextId,paragraph}){
   for(const o of drawings){o.x.textContent=String(o.left+dx);o.y.textContent=String(o.top+dy);}
   return p;
  }
- function flowParagraph(project,chunk=0,{width=740,height=410}={}){
+ function flowParagraph(project,chunk=0,{width=740,height=410,bodyPages=project.pages}={}){
   if(project.frontContent?.flowGraph){const m=window.SOP_OBJECTS.resolvedFlow(project.frontContent.flowGraph,project.pages),p=paragraph(doc,' ',2),pr=[...p.children].find(e=>e.localName==='pPr'),spacing=[...pr.children].find(e=>e.localName==='spacing'),sx=Math.min(width/m.width,height/m.height),sy=sx;spacing.setAttributeNS(W,'w:line',String(Math.round(m.height*sy*20)));spacing.setAttributeNS(W,'w:lineRule','exact');spacing.setAttributeNS(W,'w:after','0');
    for(const e of m.edges){
     const points=window.SOP_OBJECTS.flowRoute(m,e).filter((v,i,list)=>!i||Math.hypot(v.x-list[i-1].x,v.y-list[i-1].y)>.001);
@@ -110,7 +110,7 @@ function create(doc,{nextId,paragraph}){
    }
    for(const o of m.objects)p.append(nativeShape({name:'流程节点 '+o.id,x:o.x*sx,y:o.y*sy,width:o.w*sx,height:o.h*sy,geometry:({text:'rect',ellipse:'ellipse',diamond:'diamond',triangle:'triangle',arrow:'line',line:'line'})[o.type]||'rect',text:['line','arrow'].includes(o.type)?undefined:window.SOP_OBJECTS.wrapText(o.text,window.SOP_OBJECTS.flowTextWidth(o),o.fontSize).join('\n'),lineWidth:o.strokeWidth*sy,stroke:o.type==='text'?null:o.color.slice(1),fill:o.fill==='transparent'?null:o.fill.slice(1),fontSize:o.fontSize*sy,textColor:o.color.slice(1),arrow:o.type==='arrow',flipH:!!o.flipX,flipV:!!o.flipY,connector:['line','arrow'].includes(o.type)}));return centerFlow(p,width,height);
   }
-  const seen=new Set(),all=project.frontContent?.flowManual?String(project.frontContent.flowText||'').split('\n').filter(x=>x.trim()).map(name=>({name})):project.pages.filter(p=>{if(!p.name?.trim()||seen.has(p.processId))return false;seen.add(p.processId);return true;}),pages=all.slice(chunk*24,chunk*24+24),p=paragraph(doc,' ',2),pr=[...p.children].find(e=>e.localName==='pPr'),spacing=[...pr.children].find(e=>e.localName==='spacing');
+  const seen=new Set(),all=project.frontContent?.flowManual?String(project.frontContent.flowText||'').split('\n').filter(x=>x.trim()).map(name=>({name})):bodyPages.filter(p=>{if(!p.name?.trim()||seen.has(p.processId))return false;seen.add(p.processId);return true;}),pages=all.slice(chunk*24,chunk*24+24),p=paragraph(doc,' ',2),pr=[...p.children].find(e=>e.localName==='pPr'),spacing=[...pr.children].find(e=>e.localName==='spacing');
   spacing.setAttributeNS(W,'w:line',String(Math.round(height*20)));spacing.setAttributeNS(W,'w:lineRule','exact');spacing.setAttributeNS(W,'w:after','0');
   const sx=Math.min(width/1500,height/850),sy=sx;
   pages.forEach((page,i)=>{

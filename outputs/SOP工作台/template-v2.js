@@ -36,7 +36,28 @@ const value = (label, text, target, cls) => overflow(label,String(text??'').trim
 const part = (target,label,text) => '<span data-print-part="'+esc(target)+'" data-print-label="'+esc(label)+'">'+esc(text)+'</span>';
 const logo = settings => settings.showLogo!==false && settings.logo ? '<img src="'+esc(settings.logo)+'" alt="公司 Logo">' : '';
 const title = meta => [['product','产品型号'],['title','文件名称']].filter(([key])=>meta[key]).map(([key,label])=>part('meta.'+key,label,meta[key])).join(' ');
-const operationLabel = (page, fallback=String(page.processNo??page.pageNo??1).padStart(2,'0')) => String(page.processLabel??'').trim()||String(fallback);
+const processCategories=Object.freeze({Y:'预装',Z:'组装',C:'测试',B:'包装'});
+const processCategory=value=>typeof value==='string'&&Object.hasOwn(processCategories,value)?value:'';
+const numberText=number=>String(number).padStart(2,'0');
+function numberProcesses(pages){
+ const categories=new Map(),numbers=new Map(),stations={Y:0,Z:0,C:0,B:0};
+ for(const page of pages){
+  const category=processCategory(page.processCategory);
+  if(category&&!categories.has(page.processId))categories.set(page.processId,category);
+ }
+ for(const page of pages){
+  if(numbers.has(page.processId))continue;
+  const category=categories.get(page.processId);
+  numbers.set(page.processId,{processNo:numbers.size+1,processCategory:category,stationNo:category?++stations[category]:null});
+ }
+ return numbers;
+}
+function operationLabel(page,fallback=numberText(page.processNo??page.pageNo??1)){
+ const category=processCategory(page.processCategory);
+ return category&&page.processNo?numberText(page.processNo)+processCategories[category]:String(page.processLabel??'').trim()||String(fallback);
+}
+const processLabelFontSize=page=>page.processNo>=100?8:9;
+const stationLabel=page=>processCategory(page.processCategory)&&page.stationNo?page.processCategory+numberText(page.stationNo):page.station;
 function inspectionLegend(settings,key){
  const [label,fallback]=key==='importance'
   ? ['重要度','  a、关键；  b、重要；   c、一般']
@@ -75,10 +96,10 @@ function operationPaper(page, project, content, canvasOverflow=false){
  const meta=project.meta, settings=project.settings;
  const issues=[...limits('物料',page.materials,materialRows,'material',materialFields),...limits('检验',page.checks,checkRows,'check',checkFields),...limits('更改记录',recordRows(page),changeRows,'change',changes)];
  if(canvasOverflow)issues.push(issue('canvas','图文画布','画布对象超出图文区域'));
- const side=(label,text,key,foot,footText,footKey)=>'<div class="reference-station">'+value(label,text,key)+'<div class="reference-station-foot"><span>'+foot+'</span>'+value(foot,footText,footKey)+'</div></div>';
+ const side=(label,text,key,foot,footText,footKey,numberSize)=>'<div class="reference-station"'+(numberSize?' style="--process-number-size:'+numberSize+'pt"':'')+'>'+value(label,text,key)+'<div class="reference-station-foot"><span>'+foot+'</span>'+value(foot,footText,footKey)+'</div></div>';
  const head='<div class="wide-head"><div class="wide-logo">'+logo(settings)+'</div><div class="wide-title">'+overflow('文件名称',title(meta),'meta.title')+'</div><div class="wide-fields"><div><span>工艺文件编号</span>'+value('工艺文件编号',meta.number,'meta.number')+'</div><div><span>工序作业名称</span>'+value('工序作业名称',page.name+(page.isContinuation?'（续）':''),'name')+'</div></div></div>';
  const labels='<div class="wide-labels"><div>工序号</div><div>工位号</div><div>工序作业内容</div><div>工装、工具、设备</div></div>';
- const work='<div class="reference-work">'+side('工序号',operationLabel(page),'processLabel','工时',page.duration,'duration')+side('工位号',page.station,'station','人力',page.people,'people')+'<div class="op-cell" data-print-box="工序作业内容" data-print-target="operation"><div class="reference-op-content">'+content+'</div></div>'+changeTable(page)+'</div>';
+ const work='<div class="reference-work">'+side('工序号',operationLabel(page),'processLabel','工时',page.duration,'duration',processCategory(page.processCategory)&&processLabelFontSize(page))+side('工位号',stationLabel(page),'station','人力',page.people,'people')+'<div class="op-cell" data-print-box="工序作业内容" data-print-target="operation"><div class="reference-op-content">'+content+'</div></div>'+changeTable(page)+'</div>';
  const right='<div class="wide-right">'+materials(page)+checks(page)+'<div class="reference-note">'+value('备注','备注：'+(page.notes||''),'notes')+'</div><div class="reference-legend">'+value('重要度图例',inspectionLegend(settings,'importance'),'legend.importance')+value('管理手段图例',inspectionLegend(settings,'management'),'legend.management')+'</div>'+signoff(page,meta)+'</div>';
  return article('operation',settings,issues.map(issueMarkup).join('')+head+labels+'<div class="wide-body">'+work+right+'</div>','<div class="wide-page-number">第 '+page.pageNo+' 页 共 '+page.total+' 页</div>');
 }
@@ -148,5 +169,5 @@ function printIssues(paper){
  return [...issues.values()];
 }
 
-window.SOP_TEMPLATE={operationPaper,operationLabel,inspectionLegend,coverPaper,historyPaper,flowPaper,originalPaper,printIssues,dimensions,operationText,changes,historyFields,coverFields,coverSigners,recordRows,materialRows,checkRows,changeRows,historyRows};
+window.SOP_TEMPLATE={operationPaper,operationLabel,processLabelFontSize,stationLabel,processCategory,processCategories,numberProcesses,inspectionLegend,coverPaper,historyPaper,flowPaper,originalPaper,printIssues,dimensions,operationText,changes,historyFields,coverFields,coverSigners,recordRows,materialRows,checkRows,changeRows,historyRows};
 })();
