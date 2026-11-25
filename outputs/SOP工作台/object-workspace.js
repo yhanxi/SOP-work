@@ -902,7 +902,7 @@ function open(input,{title='图文画布',flow=false,photos=[],availableHeight,p
   };
   if(!calloutPoint)input.onblur=()=>{if(!editor.prompting)finishInline();};
   input.focus();input.select();
-  message(calloutPoint?'Enter 添加，Shift+Enter 换行，Esc 取消。':'直接输入文字；Enter 换行，Ctrl+Enter 完成，Esc 取消。');
+  message(calloutPoint?'点击画布空白处或按 Enter 添加，Shift+Enter 换行，Esc 取消。':'点击画布空白处或按 Ctrl+Enter 完成，Enter 换行，Esc 取消。');
  }
  function beginInline(key=selected){
   if(inlineEdit)return;
@@ -975,7 +975,20 @@ function open(input,{title='图文画布',flow=false,photos=[],availableHeight,p
   attachEndpoint(m,o,key,snap);setLineEndpoints(o,ends);
  }
  q('.object-stage').tabIndex=0;
- q('.object-stage').onpointerdown=ev=>{if(inlineEdit||ev.button!==0)return;ev.preventDefault();if(calloutPoint)return;q('.object-stage').focus({preventScroll:true});snap=null;
+ q('.object-stage').onpointerdown=ev=>{
+  if(ev.button!==0)return;
+  if(inlineEdit){
+   const edit=inlineEdit;
+   if(edit.host.contains(ev.target)){ev.preventDefault();return;}
+   if(!ev.target.closest('[data-object]')){
+    ev.preventDefault();
+    // Let the browser finish any active IME composition before committing.
+    edit.input.blur();
+    if(inlineEdit===edit)finishInline(!calloutPoint||!!edit.input.value.trim());
+   }
+   return;
+  }
+  ev.preventDefault();if(calloutPoint)return;q('.object-stage').focus({preventScroll:true});snap=null;
   if(tool==='callout'){
    if(!ev.target.closest('svg'))return;
    const {x,y}=new DOMPoint(ev.clientX,ev.clientY).matrixTransform(q('svg').getScreenCTM().inverse());

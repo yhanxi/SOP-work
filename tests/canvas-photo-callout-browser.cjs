@@ -58,6 +58,14 @@ async function main(){
    const point=new DOMPoint(x,y).matrixTransform(svg.getScreenCTM());
    return {x:point.x,y:point.y};
   },{x,y});
+  const clickBlank=async()=>{
+   const point=await sheetPoint(30,45);
+   assert(await stage.evaluate((svg,{x,y})=>{
+    const hit=document.elementFromPoint(x,y);
+    return svg.contains(hit)&&!hit.closest('[data-object], foreignObject');
+   },point),'The click must reach blank canvas');
+   await page.mouse.click(point.x,point.y);
+  };
   const arrowLine=surface=>surface.locator('line[marker-start],line[marker-end]');
   const linePoints=(line,canvasCoordinates=false)=>line.evaluate((node,canvasCoordinates)=>{
    const screen=node.getScreenCTM();
@@ -167,7 +175,8 @@ async function main(){
    const whileTyping=await assertInlineCenter(inline,group);
    samePoint(box,whileTyping);
    const before=compareLines?await visibleLines(group,'mixed-typing.png'):null;
-   await inline.press(key);
+   if(key)await inline.press(key);
+   else await clickBlank();
    await inline.waitFor({state:'hidden'});
    sameBox(key==='Escape'?box:whileTyping,await frameBounds(group));
    await assertRectangle(group);
@@ -184,6 +193,37 @@ async function main(){
   await page.locator('#editPageCanvas').click();
   await add.click();
   const target=await photoPoint(.36,.63);
+  await page.mouse.click(target.x,target.y);
+  await input.fill('  ');
+  await clickBlank();
+  await input.waitFor({state:'hidden'});
+  assert(await dialog.isVisible());
+  assert.equal(await stage.locator('g[data-object]').count(),1);
+  assert.equal(await add.getAttribute('aria-pressed'),'false');
+
+  await add.click();
+  await page.mouse.click(target.x,target.y);
+  await input.fill('检查');
+  await input.press('End');
+  const cdp=await page.context().newCDPSession(page);
+  await cdp.send('Input.imeSetComposition',{text:'打胶',selectionStart:2,selectionEnd:2});
+  assert.equal(await input.inputValue(),'检查打胶');
+  const quickLabelId=await selectedRectangle.getAttribute('data-object');
+  const quickDraftBox=await assertInlineCenter(input,selectedRectangle);
+  await clickBlank();
+  await input.waitFor({state:'hidden'});
+  await cdp.detach();
+  assert(await dialog.isVisible());
+  const quickLabel=object(stage,quickLabelId);
+  assert.equal(await textNode(quickLabel).inputValue(),'检查打胶');
+  sameBox(quickDraftBox,await frameBounds(quickLabel));
+  await assertRectangle(quickLabel);
+  assert.equal(await stage.locator('g[data-object]').count(),3);
+  assert.equal(await arrowLine(stage).count(),1);
+  await dialog.locator('[data-action="undo"]').click();
+  assert.equal(await stage.locator('g[data-object]').count(),1,'One undo removes the label and arrow together');
+
+  await add.click();
   await page.mouse.click(target.x,target.y);
   assert(await input.isVisible(),await dialog.locator('.object-message').textContent());
   await input.fill(firstText);
@@ -265,7 +305,7 @@ async function main(){
   assert.equal(await arrowLine(stage).count(),2);
   samePoint((await linePoints(arrowLine(stage).last()))[0],next);
   await editInline(secondGroup,'更改标题\n校对第二行','Control+Enter');
-  await editInline(secondGroup,secondText,'Control+Enter');
+  await editInline(secondGroup,secondText);
   assert.equal(await textNode(secondGroup).inputValue(),secondText);
   const secondArrowId=await arrowLine(stage).last().locator('..').getAttribute('data-object');
   const secondArrow=arrowLine(object(stage,secondArrowId));
@@ -287,7 +327,24 @@ async function main(){
   const manualId=await selectedRectangle.getAttribute('data-object');
   const manual=object(stage,manualId);
   await editInline(manual,'手绘对照','Control+Enter');
-  await editInline(manual,'第一行\n第二行','Control+Enter');
+  const manualBefore=await frameBounds(manual);
+  const manualCenter=boxPoint(manualBefore,.5,.5);
+  await page.mouse.dblclick(manualCenter.x,manualCenter.y);
+  await inline.fill('边缘点按继续编辑');
+  const editorPadding=boxPoint(manualBefore,.5,.1);
+  assert(await stage.evaluate((svg,{x,y})=>{
+   const hit=document.elementFromPoint(x,y);
+   return svg.contains(hit)&&hit.matches('.object-inline-editor');
+  },editorPadding),'The click must reach the editor padding');
+  await page.mouse.click(editorPadding.x,editorPadding.y);
+  assert(await inline.isVisible(),'Clicking inside the editor must keep it open');
+  await inline.fill('第一行\n第二行');
+  await clickBlank();
+  await inline.waitFor({state:'hidden'});
+  assert(await dialog.isVisible());
+  sameBox(manualBefore,await frameBounds(manual));
+  await assertRectangle(manual);
+  assert.equal(await arrowLine(stage).count(),2);
   await editInline(manual,'取消输入','Escape');
   assert.equal(await textNode(manual).inputValue(),'第一行\n第二行');
   await size.fill('24');
@@ -445,8 +502,17 @@ async function main(){
   samePoint(oldTail,boxPoint(await object(preview,'test-photo').locator('image').boundingBox(),.4,.55));
   await page.locator('#editPageCanvas').click();
   await assertRectangle(object(stage,'old-label'),'#243e46');
+  const plain=object(stage,'plain-text');
+  const plainCenter=boxPoint(await frameBounds(plain),.5,.5);
+  await page.mouse.dblclick(plainCenter.x,plainCenter.y);
+  await inline.fill('普通文字修改');
+  await clickBlank();
+  await inline.waitFor({state:'hidden'});
+  assert(await dialog.isVisible());
+  assert.equal(await plain.locator('text').textContent(),'普通文字修改');
   await save.click();
   const migrated=await model();
+  assert.equal(migrated.objects.find(item=>item.id==='plain-text').text,'普通文字修改');
   assert.equal(migrated.objects.find(item=>item.id==='old-label').type,'rect');
   assert.deepEqual(migrated.objects.find(item=>item.id==='old-arrow').attachments.start,{targetId:'old-label',anchorIndex:7,auto:true});
 
@@ -461,7 +527,7 @@ async function main(){
   samePoint(drawnTip,manualTip);
   await save.click();
   assert.deepEqual(errors,[]);
-  console.log('PASS: callout arrowheads at the label, precise photo tails, live side switching, legacy migration, unchanged hand-drawn arrows, and matching Word arrowheads');
+  console.log('PASS: blank-canvas text confirmation, IME, atomic undo, callout geometry, legacy migration, hand-drawn arrows, and editable Word export');
  }catch(error){
   if(errors.length)console.error(errors);
   throw error;
