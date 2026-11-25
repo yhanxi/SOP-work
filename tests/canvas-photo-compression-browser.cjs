@@ -181,8 +181,10 @@ async function main(){
   assert.equal(cropped.x,replacement.x);
 
   await page.evaluate(()=>SOP.replaceProject({...SOP.clone(SOP.project),pages:[SOP.blankPage()]}));
-  await page.locator('#photoFile').setInputFiles(file('small.png',fixture.small));
+  await page.locator('#photoFile').setInputFiles(file('IMG_0001.png',fixture.small));
   await page.waitForFunction(()=>SOP.project.pages[0].photos.length===1);
+  assert.equal(await page.locator('.photo-card input[data-caption]').inputValue(),'');
+  assert.equal(await page.evaluate(()=>SOP.project.pages[0].photos[0].caption),'');
   await page.evaluate(({source,meta,alternate})=>{
    const p=SOP.project.pages[0],small=p.photos[0];
    small.rendered=alternate;
@@ -196,6 +198,8 @@ async function main(){
   await save();
   const [convertedSmall,convertedLarge]=await photos();
   assert.equal(convertedSmall.data,fixture.small);
+  assert.equal(convertedSmall.caption,'');
+  assert.equal(convertedLarge.caption,'原始配图');
   assert.equal(Math.max(...await size(convertedLarge.data)),1800);
   const saved=await page.evaluate(()=>SOP.projectForStorage(SOP.project).pages[0]);
   assert.equal(saved.photos[1].data,original);

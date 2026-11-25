@@ -829,7 +829,7 @@ function renderPhotos(){
 }
 async function filePhoto(file){
  const {data,width,height}=await window.SOP_OBJECTS.readPhoto(file,{allowOtherFormats:true});
- return {id:uid(),data,width,height,caption:file.name.replace(/\.[^.]+$/,''),marks:[]};
+ return {id:uid(),data,width,height,caption:'',marks:[]};
 }
 async function addPhotos(files){
  const p=page();

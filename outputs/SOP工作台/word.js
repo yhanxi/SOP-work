@@ -570,7 +570,7 @@ async function importDocx(buffer){
    if(value.text)n[field]+=(n[field]?'\n':'')+value.text;
   }
 
-  const ids=window.SOP_IMPORT.imageIds(op);for(const rid of ids){const target=relmap.get(rid);if(!target)continue;const path='word/'+target.replace(/^\.\//,'');const f=z.file(path);if(!f)continue;const ext=path.split('.').pop().toLowerCase();if(!['png','jpg','jpeg','webp'].includes(ext))continue;const mime=ext==='jpg'?'jpeg':ext;n.photos.push({id:window.SOP.uid(),data:'data:image/'+mime+';base64,'+await f.async('base64'),caption:'作业图 '+(n.photos.length+1),marks:[]});}
+  const ids=window.SOP_IMPORT.imageIds(op);for(const rid of ids){const target=relmap.get(rid);if(!target)continue;const path='word/'+target.replace(/^\.\//,'');const f=z.file(path);if(!f)continue;const ext=path.split('.').pop().toLowerCase();if(!['png','jpg','jpeg','webp'].includes(ext))continue;const mime=ext==='jpg'?'jpeg':ext;n.photos.push({id:window.SOP.uid(),data:'data:image/'+mime+';base64,'+await f.async('base64'),caption:'',marks:[]});}
   const qrow=rows.findIndex(r=>/检查频次|控制特性/.test(txt(r)));
   const materialEnd=qrow>3?qrow:Math.min(8,rows.length);
   for(const row of rows.slice(4,materialEnd)){const cs=cells(row);if(isWide&&cs.length===4&&cs.slice(1).some(c=>txt(c).trim()))n.materials.push({name:txt(cs[1]),spec:txt(cs[2]),qty:txt(cs[3])});if(cs.length>=7&&cs.slice(4,7).some(c=>txt(c).trim()))n.materials.push({name:txt(cs[4]),spec:txt(cs[5]),qty:txt(cs[6])});}
