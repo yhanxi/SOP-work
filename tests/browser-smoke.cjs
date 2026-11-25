@@ -189,6 +189,17 @@ const root=path.resolve(__dirname,'..');
   await page.waitForFunction(()=>document.querySelector('#saveState').textContent.includes('operation-numbers.sop.json'));
   await page.locator('#importBtn').click();
   await page.waitForFunction(()=>document.querySelector('#processLabelInput').value==='A-01');
+  const previewFlowLabels=await page.evaluate(()=>{
+   const labels=[],original=CanvasRenderingContext2D.prototype.fillText;
+   CanvasRenderingContext2D.prototype.fillText=function(text,...args){
+    if(this.canvas.width===1500&&this.canvas.height===850)labels.push(text);
+    return original.call(this,text,...args);
+   };
+   try{SOP.setSelected('front:flow:0');}
+   finally{CanvasRenderingContext2D.prototype.fillText=original;SOP.setSelected(SOP.project.pages[0].id);}
+   return labels;
+  });
+  assert.deepEqual(previewFlowLabels,['检验','包装','准备']);
   const operationNumbers=await page.evaluate(async()=>{
    const blob=await SOP_WORD.exportDocx(SOP.project,SOP.layout,SOP.front);
    const bytes=await blob.arrayBuffer(),zip=await JSZip.loadAsync(bytes);
@@ -204,12 +215,13 @@ const root=path.resolve(__dirname,'..');
     visible, saved:embedded.pages.map(operation=>operation.processLabel??''),
     imported:imported.pages.map(operation=>operation.processLabel),
     pageNos:SOP.layout.map(operation=>operation.pageNo),
-    flow:xml.includes('A-01. 检验')&&xml.includes('012. 准备')
+    flow:[...rows(tables.find(table=>rows(table)[0]?.textContent.includes('工艺流程图')))[1]
+     .getElementsByTagNameNS(W,'txbxContent')].map(node=>node.textContent)
    };
   });
   assert.deepEqual(operationNumbers,{
    visible:['A-01','02','012','012'], saved:['A-01','','012','012'],
-   imported:['A-01','02','012','012'], pageNos:[1,2,3,4], flow:true
+   imported:['A-01','02','012','012'], pageNos:[1,2,3,4], flow:['检验','包装','准备']
   });
   await label.fill('');
   await page.waitForFunction(()=>document.querySelector('#previewStage [data-print-box="工序号"]').textContent==='01');

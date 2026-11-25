@@ -1,7 +1,7 @@
 /* Project-file saving is separate from the local crash-recovery cache. */
 (() => {
 'use strict';
-window.SOP_FILES={create({getProject,applyProject,recover,toast,download,filename,stateText}){
+window.SOP_FILES={create({getProject,applyProject,recover,toast,download,filename,stateText,getEditor=()=>null}){
  const desktop=window.sopDesktop;
  let binding=null,handle=null,savedHash='',diskHash='',revision=0,savedRevision=0,initialDirty=false,busy=false,ready=false;
  const folderButton=document.getElementById('projectFolderBtn');
@@ -32,9 +32,8 @@ window.SOP_FILES={create({getProject,applyProject,recover,toast,download,filenam
  }
  function setBusy(value){busy=value;for(const id of ['saveBtn','saveAsBtn','newBtn','importBtn'])document.getElementById(id).disabled=value||!ready;updateFolderButton();}
  function pendingDialog(){
-  if(document.querySelector('.object-dialog[open]'))return '请先点击“保存画布”，或取消画布编辑，再保存项目或关闭软件。';
-  if(document.querySelector('#photoDialog[open]'))return '请先保存图片标注，或关闭标注窗口，再保存项目或关闭软件。';
-  if(document.querySelector('#formDialog[open] #dialogApply:not([hidden])'))return '请先保存或取消当前设置窗口，再保存项目或关闭软件。';
+  const apply=document.querySelector('#formDialog[open] #dialogApply:not([hidden])');
+  if(apply&&apply.closest('dialog')!==getEditor()?.owner)return '请先保存或取消当前设置窗口，再保存项目或关闭软件。';
   return '';
  }
  async function cache(){try{await recover();document.body.dataset.recovery='saved';return true;}catch{document.body.dataset.recovery='failed';return false;}finally{status();}}
@@ -45,12 +44,13 @@ window.SOP_FILES={create({getProject,applyProject,recover,toast,download,filenam
   dialog.addEventListener('cancel',event=>{event.preventDefault();finish('cancel');});
   dialog.querySelectorAll('[data-choice]').forEach(button=>button.onclick=()=>finish(button.dataset.choice));document.body.append(dialog);dialog.showModal();
  });}
- async function save(saveAs=false){
+ async function save(saveAs=false,editorChange){
   if(!ready||busy)return false;
   const pending=pendingDialog();if(pending){toast(pending,true);return false;}
   setBusy(true);
   try{
-   const capturedRevision=revision,text=JSON.stringify(getProject(),null,2),fingerprint=await contentHash();
+   const capturedRevision=revision,candidate=editorChange?.project??getProject();
+   const text=JSON.stringify(candidate,null,2),fingerprint=await hash(stateText(candidate));
    let result;
    if(desktop){
     result=await desktop.saveProjectFile({text,name:filename()+'.sop.json',token:binding?.token,saveAs});
@@ -63,23 +63,44 @@ window.SOP_FILES={create({getProject,applyProject,recover,toast,download,filenam
     handle=target;binding=null;diskHash=await hash(text);
    }else{
     download(new Blob([text],{type:'application/json'}),filename()+'.sop.json');
-    toast('已发起项目副本下载。此浏览器不能直接更新原文件，请确认下载完成；桌面版支持保存到当前文件。',true);
+    const message='已发起项目副本下载。请确认下载完成后再退出。';
+    const editor=getEditor();
+    if(editor?.message)editor.message(message);else toast(message,true);
     return false;
    }
-   savedHash=fingerprint;savedRevision=capturedRevision;initialDirty=false;
+   editorChange?.commit();
+   savedHash=fingerprint;savedRevision=capturedRevision+Number(!!editorChange);initialDirty=false;
    const cached=await cache();
    toast(result?.binding?.warning||(!cached?'项目文件已保存；本机恢复缓存不可用。':'项目文件已保存：'+(binding?.name||handle.name)),!cached||!!result?.binding?.warning);
    return true;
-  }catch(error){if(error.name!=='AbortError')toast('保存失败，原项目文件保留：'+error.message,true);return false;}
+  }catch(error){
+   if(error.name!=='AbortError'){
+    const message='保存项目失败：'+error.message;
+    const editor=getEditor();
+    if(editor?.message)editor.message(message);else toast(message,true);
+   }
+   return false;
+  }
   finally{setBusy(false);status();}
  }
  async function guard(reason){
   if(!ready||busy){toast('文件操作正在进行，请稍候。',true);return false;}
+  const editor=getEditor();
+  if(editor&&!await editor.requestClose(true))return false;
   const pending=pendingDialog();if(pending){toast(pending,true);return false;}
-  if(!dirty())return true;
-  const choice=desktop?await desktop.confirmUnsaved(reason):await browserChoice(reason);
-  if(choice==='cancel')return false;
-  if(choice==='save'){const saved=await save(false);if(saved&&dirty()){toast('保存期间又有新修改，请再次保存。',true);return false;}return saved;}return choice==='discard';
+  if(dirty()){
+   const choice=desktop?await desktop.confirmUnsaved(reason):await browserChoice(reason);
+   if(choice==='cancel')return false;
+   if(choice==='save'){
+    if(!await save(false))return false;
+    if(dirty()){toast('保存期间又有新修改，请再次保存。',true);return false;}
+   }
+  }
+  if(editor?.dialog.open&&(reason==='open'||reason==='new')){
+   editor.close();
+   if(editor.owner?.open)editor.owner.close();
+  }
+  return true;
  }
  async function imported({text,bytes,isWord,ticket,newHandle}){
   let p=isWord?await window.SOP_WORD.importDocx(bytes):JSON.parse(text.replace(/^\uFEFF/,''));
@@ -115,8 +136,8 @@ window.SOP_FILES={create({getProject,applyProject,recover,toast,download,filenam
   },
   async detach(){if(desktop)await desktop.resetProjectFile();binding=null;handle=null;savedHash='';diskHash='';initialDirty=true;revision++;status();},
   async importFile(file){if(busy||!ready)return;setBusy(true);try{if(file.size>120*1024*1024)throw Error('文件超过 120MB。');const isWord=/\.docx$/i.test(file.name);await imported({text:isWord?null:await file.text(),bytes:isWord?await file.arrayBuffer():null,isWord});}catch(error){toast('打开失败，当前项目仍保留：'+error.message,true);}finally{setBusy(false);status();}},
-  async beforeClose(){if(!await guard('close'))return {ok:false,canceled:true};await cache();return {ok:true};},
-  beforeUnload(event){if(dirty()||pendingDialog()){event.preventDefault();event.returnValue='';}}
+  async beforeClose(reason='close'){if(!await guard(reason))return {ok:false,canceled:true};await cache();return {ok:true};},
+  beforeUnload(event){if(dirty()||pendingDialog()||getEditor()?.isDirty()){event.preventDefault();event.returnValue='';}}
  };
 }};
 })();

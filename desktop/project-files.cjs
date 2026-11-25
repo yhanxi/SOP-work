@@ -63,7 +63,7 @@ function createProjectFileService({dialog,getWindow,sessionFile,pause=()=>{},res
    await atomicWrite(file,request.text,expected);
    const binding=await remember({path:file,token:saveAs?crypto.randomUUID():current.token,fileHash:digest(Buffer.from(request.text,'utf8'))});return {canceled:false,binding};
   });},
-  async confirm(reason){await ready;return nativeDialog('showMessageBox',{type:'question',title:'项目有未保存的更改',message:'是否先保存到项目文件？',detail:current?current.path:'当前项目尚未保存为文件。',buttons:['保存','不保存，继续'+({open:'打开',new:'新建',close:'关闭'}[reason]||'操作'),'取消'],defaultId:0,cancelId:2,noLink:true}).then(r=>['save','discard','cancel'][r.response]||'cancel');}
+  async confirm(reason){await ready;return nativeDialog('showMessageBox',{type:'question',title:'项目有未保存的更改',message:'是否先保存到项目文件？',detail:current?current.path:'当前项目尚未保存为文件。',buttons:['保存','不保存，继续'+({open:'打开',new:'新建',close:'关闭',reload:'刷新'}[reason]||'操作'),'取消'],defaultId:0,cancelId:2,noLink:true}).then(r=>['save','discard','cancel'][r.response]||'cancel');}
  };
 }
 module.exports={createProjectFileService,atomicWrite,validate};

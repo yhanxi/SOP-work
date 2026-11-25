@@ -37,13 +37,20 @@ async function main(){
   await row(13).locator('[data-flow-key="shape"]').selectOption('ellipse');
   await row(20).locator('[data-flow-key="shape"]').selectOption('triangle');
   await page.locator('#flowAddStep').click();
-  await row(21).locator('[data-flow-key="name"]').fill('烧引导');
+  await row(21).locator('[data-flow-key="name"]').fill('3. 烧引导');
   for(let i=21;i>16;i--)await row(i).locator('[data-flow-move="-1"]').click();
   if(process.env.SOP_FLOW_QA_OUTPUT)await page.locator('#formDialog').screenshot({path:path.join(process.env.SOP_FLOW_QA_OUTPUT,'config.png')});
   await page.locator('#dialogApply').click();
   const canvas=page.locator('.object-dialog');
   await canvas.waitFor();
   assert.equal(await page.evaluate(()=>SOP.project.frontContent?.flowGraph),undefined);
+  const labelsIn=scope=>scope.locator('svg g[data-object][transform] text').allTextContents();
+  const assertNames=labels=>{
+   assert(labels.includes('★ 安装光电传感器'));
+   assert(labels.includes('3. 烧引导'));
+   assert(!labels.some(label=>/^(★ )?\d+\. /.test(label)&&label!=='3. 烧引导'));
+  };
+  assertNames(await labelsIn(canvas));
   await canvas.getByRole('button',{name:'应用流程图'}).click();
   await page.locator('#formDialog').waitFor({state:'hidden'});
   const result=await page.evaluate(()=>{
@@ -58,6 +65,15 @@ async function main(){
   });
   assert.equal(result.nodes,22);assert.equal(result.branches,4);assert.equal(result.cross,2);
   assert(result.orthogonal&&result.branchOnMain&&result.crossJoin);
+  await page.evaluate(()=>{
+   const {objects}=SOP.project.frontContent.flowGraph;
+   const linked=objects.find(o=>o.text==='★ 安装光电传感器');
+   const standalone=objects.find(o=>o.text==='3. 烧引导');
+   Object.assign(linked,{prefix:'★ 7. ',text:'★ 7. 安装光电传感器'});
+   Object.assign(standalone,{prefix:'14. ',text:'14. 3. 烧引导'});
+   SOP.refresh();
+  });
+  assertNames(await labelsIn(page.locator('#previewStage .flow-wrap')));
   const longNames=await page.evaluate(()=>{
    const rows=[
     {key:'first',role:'main',name:'安装深沟球轴承 6705ZZ'},
@@ -85,6 +101,7 @@ async function main(){
   assert(longNames,'Long branch text must stay inside its box with room for the next branch');
   if(process.env.SOP_FLOW_QA_OUTPUT)await page.locator('#previewStage').screenshot({path:path.join(process.env.SOP_FLOW_QA_OUTPUT,'preview.png')});
   await page.locator('#editFlowGraph').click();
+  assertNames(await labelsIn(canvas));
   const labelClearance=await canvas.locator('svg').evaluate(svg=>{
    const graph=SOP.project.frontContent.flowGraph;
    return [...svg.querySelectorAll('[data-flow-handle="label"]')].map(label=>{
@@ -196,11 +213,15 @@ async function main(){
    const flowCentered=bounds.length>0&&[cellWidth-inner('left')-inner('right'),cellHeight-inner('top')-inner('bottom')].every((span,axis)=>
     Math.abs(Math.min(...bounds.map(b=>b[axis]))+Math.max(...bounds.map(b=>b[axis+2]))-span*635)<=1);
    const imported=await SOP_WORD.importDocx(bytes);
-   return {historyCentered,flowCentered,renamed:xml.includes('安装传感器新版'),shapes:(xml.match(/name="流程连接 /g)||[]).length,
+   return {historyCentered,flowCentered,labels:[...body.getElementsByTagNameNS(W,'txbxContent')].map(n=>n.textContent),
+    shapes:(xml.match(/name="流程连接 /g)||[]).length,
     geometry:['triangle','diamond','ellipse'].every(type=>xml.includes('prst="'+type+'"')),same:JSON.stringify(imported.frontContent.flowGraph)===JSON.stringify(p.frontContent.flowGraph),
     flowSetup:imported.frontContent.flowSetup.rows.length,bytes: Array.from(new Uint8Array(bytes))};
   });
-  assert(roundTrip.renamed&&roundTrip.geometry&&roundTrip.same);
+  assert(roundTrip.labels.includes('★ 安装传感器新版'));
+  assert(roundTrip.labels.includes('3. 烧引导'));
+  assert(!roundTrip.labels.some(label=>/^(★ )?\d+\. /.test(label)&&label!=='3. 烧引导'));
+  assert(roundTrip.geometry&&roundTrip.same);
   assert(roundTrip.historyCentered&&roundTrip.flowCentered);
   assert(roundTrip.shapes>21);assert.equal(roundTrip.flowSetup,22);
   if(process.env.SOP_FLOW_QA_OUTPUT)require('node:fs').writeFileSync(path.join(process.env.SOP_FLOW_QA_OUTPUT,'flow.docx'),Buffer.from(roundTrip.bytes));

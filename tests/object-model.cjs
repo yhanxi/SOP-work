@@ -16,5 +16,22 @@ assert.equal(O.restorePhotoCaptions({objects:[oldPhoto,oldLabel,{...oldLabel,id:
 const graph=O.normalize({width:1000,height:650,objects:[{id:'a',type:'diamond',x:100,y:50,w:140,h:80,text:'检验合格？'},{id:'b',type:'rect',x:500,y:300,w:200,h:70}],edges:[{id:'edge',from:'a',to:'b',label:'否'}]});const before=O.edgePoints(graph,graph.edges[0]);graph.objects[0].x+=80;const after=O.edgePoints(graph,graph.edges[0]);assert.notDeepEqual(after,before);assert.equal(graph.edges[0].label,'否');
 const saved=JSON.parse(JSON.stringify(graph));assert.deepEqual(O.normalize(saved),graph);const duplicate=O.duplicate(saved,'a');assert(duplicate!=='a');assert.equal(saved.objects.length,3);O.remove(saved,'a');assert.equal(saved.edges.length,0);assert(saved.objects.some(o=>o.id===duplicate));
 const processes=Array.from({length:25},(_,i)=>({name:'工序'+i,processId:'p'+i}));assert.throws(()=>O.fromProcesses(processes),/最多支持24/);assert.equal(new Set(O.fromProcesses(processes.slice(0,24)).objects.map(o=>o.x+','+o.y)).size,24);
+const namedProcesses=[{processId:'prep',name:'3.5mm 轴预装'},{processId:'test',name:'24V 测试'}];
+const generated=O.generateFlow([
+ {key:'prep',...namedProcesses[0],role:'main',star:true},
+ {key:'test',...namedProcesses[1],role:'branch',target:'prep'},
+ {key:'manual',role:'main',name:'3. 包装'}
+],1);
+assert.deepEqual(generated.objects.map(o=>o.text),['★ 3.5mm 轴预装','24V 测试','3. 包装']);
+const oldFlow={...generated,objects:[
+ {...generated.objects[0],prefix:'★ 1. ',text:'★ 1. 旧工序名称'},
+ {...generated.objects[1],processId:'deleted',prefix:'2. ',text:'2. 24V 测试'},
+ {...generated.objects[2],prefix:'3. ',text:'3. 3. 包装'},
+ {type:'rect',text:'01预装. 手工备注'}
+]};
+const updatedFlow=O.resolvedFlow(oldFlow,namedProcesses);
+assert.deepEqual(updatedFlow.objects.map(o=>o.text),['★ 3.5mm 轴预装','24V 测试','3. 包装','01预装. 手工备注']);
+assert.deepEqual(O.resolvedFlow(updatedFlow,namedProcesses),updatedFlow);
+assert.equal(oldFlow.objects[0].text,'★ 1. 旧工序名称');
 const wrapped=O.wrapText('孔位检查ABC',60,20);assert(wrapped.length>1);assert.equal(wrapped.join(''),'孔位检查ABC');assert(wrapped.every(s=>Array.from(s).reduce((n,c)=>n+(c.charCodeAt(0)>255?1:.58),0)<=2.6));assert.throws(()=>O.normalize({objects:[{type:'photo',data:'https://example.test/image.png'}]}),/本地/);
 console.log('PASS: independent objects, photo aspect ratio, vertical arrows, branch persistence, live edges, deletion and graph capacity');

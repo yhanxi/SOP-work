@@ -18,8 +18,9 @@ contextBridge.exposeInMainWorld('sopDesktop',{
  onUpdate:callback=>ipcRenderer.on('sop:update-state',(_event,state)=>callback(state)),
  exportPDF:name=>ipcRenderer.invoke('sop:export-pdf',name),
  openProof:request=>ipcRenderer.invoke('sop:open-proof',request),
- onBeforeClose:callback=>ipcRenderer.on('sop:before-close',async()=>{
-  let result;try{result=await callback();}catch(e){result={ok:false,error:e.message};}
-  ipcRenderer.send('sop:close-ready',result);
+ onBeforeClose:callback=>ipcRenderer.on('sop:before-close',async(_event,id,reason)=>{
+  ipcRenderer.send('sop:close-received',id);
+  let result;try{result=await callback(reason);}catch(e){result={ok:false,error:e.message};}
+  ipcRenderer.send('sop:close-ready',id,result);
  })
 });

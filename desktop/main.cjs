@@ -10,13 +10,39 @@ const origin='sop://app';
 protocol.registerSchemesAsPrivileged([{scheme:'sop',privileges:{standard:true,secure:true,supportFetchAPI:true}}]);
 const testMode=process.argv.includes('--sop-test');
 if(testMode&&process.env.SOP_STUDIO_TEST_USERDATA)app.setPath('userData',path.resolve(process.env.SOP_STUDIO_TEST_USERDATA));
-let win,projectFiles,proofFiles,updater,restartRequested=false,allowClose=false,closing=false,closeTimer;
-function startCloseTimer(){clearTimeout(closeTimer);if(closing)closeTimer=setTimeout(()=>respondToClose({error:'保存请求超时，请重试保存。'}),30000);}
+let win,projectFiles,proofFiles,updater,restartRequested=false,allowClose=false,pendingExit,exitSequence=0,exitTimer;
 const trusted=event=>win&&!win.isDestroyed()&&event.sender===win.webContents&&event.senderFrame===win.webContents.mainFrame&&event.senderFrame.url.startsWith(origin+'/');
-async function respondToClose(result){clearTimeout(closeTimer);closing=false;if(result?.ok){try{if(restartRequested)await updater.launchInstall();allowClose=true;win.close();}catch(error){restartRequested=false;dialog.showErrorBox('更新未安装',error.message);}}else{restartRequested=false;if(!result?.canceled)dialog.showMessageBox(win,{type:'warning',title:'项目尚未保存',message:'保存未完成，请先保存项目文件，再关闭软件。',detail:String(result?.error||'保存没有及时完成。')});}}
-ipcMain.on('sop:close-ready',(event,result)=>{if(trusted(event)&&closing)respondToClose(result);});
+function requestExit(reason,ignoreCache=false){
+ if(pendingExit)return;
+ const id=++exitSequence;
+ pendingExit={id,reason,ignoreCache};
+ exitTimer=setTimeout(()=>respondToExit({error:'工作台未收到保存请求，请重试。'}),30000);
+ win.webContents.send('sop:before-close',id,reason);
+}
+async function respondToExit(result){
+ const request=pendingExit;
+ if(!request||request.responded)return;
+ request.responded=true;
+ clearTimeout(exitTimer);
+ try{
+  if(!result?.ok){
+   restartRequested=false;
+   const action=request.reason==='reload'?'刷新工作台':'关闭软件';
+   if(!result?.canceled)await dialog.showMessageBox(win,{type:'warning',title:'项目尚未保存',message:`保存未完成，请先保存项目文件，再${action}。`,detail:String(result?.error||'保存没有及时完成。')});
+  }else if(request.reason==='reload'){
+   if(request.ignoreCache)win.webContents.reloadIgnoringCache();else win.webContents.reload();
+  }else{
+   if(restartRequested)await updater.launchInstall();
+   allowClose=true;
+   win.close();
+  }
+ }catch(error){const title=restartRequested?'更新未安装':'操作未完成';restartRequested=false;dialog.showErrorBox(title,error.message);}
+ finally{if(pendingExit===request)pendingExit=null;}
+}
+ipcMain.on('sop:close-received',(event,id)=>{if(trusted(event)&&pendingExit?.id===id)clearTimeout(exitTimer);});
+ipcMain.on('sop:close-ready',(event,id,result)=>{if(trusted(event)&&pendingExit?.id===id)respondToExit(result);});
 for(const [channel,method]of [['info','info'],['reset','reset'],['open','open'],['commit-open','commit'],['save','save'],['confirm','confirm']])ipcMain.handle('sop:project-'+channel,(event,arg)=>{if(!trusted(event))throw Error('请求来源不支持');return projectFiles[method](arg);});
-for(const [name,action]of [['info',()=>updater.info()],['check',()=>updater.check(true)],['download',()=>updater.download()],['cancel',()=>updater.cancel()],['settings',value=>updater.configure(value)],['install',async()=>{await updater.prepareInstall();restartRequested=true;win.close();}],['release',()=>require('electron').shell.openExternal(require('./update-core.cjs').releaseURL)]])ipcMain.handle('sop:update-'+name,(event,arg)=>{if(!trusted(event))throw Error('请求来源不支持');return action(arg);});
+for(const [name,action]of [['info',()=>updater.info()],['check',()=>updater.check(true)],['download',()=>updater.download()],['cancel',()=>updater.cancel()],['settings',value=>updater.configure(value)],['install',async()=>{await updater.prepareInstall();if(pendingExit)throw Error('请完成当前关闭或刷新操作后重试。');restartRequested=true;win.close();}],['release',()=>require('electron').shell.openExternal(require('./update-core.cjs').releaseURL)]])ipcMain.handle('sop:update-'+name,(event,arg)=>{if(!trusted(event))throw Error('请求来源不支持');return action(arg);});
 ipcMain.handle('sop:project-reveal',async(event,token)=>{
  if(!trusted(event))throw Error('请求来源不支持');
  const current=await projectFiles.info();
@@ -40,8 +66,18 @@ function createWindow(){
  win.webContents.on('will-navigate',(event,url)=>{if(url!==origin+'/index.html')event.preventDefault();});
  win.webContents.session.setPermissionRequestHandler((_wc,_permission,callback)=>callback(false));
  win.webContents.session.on('will-download',(_event,item)=>item.setSaveDialogOptions({title:'保存 SOP 文件',defaultPath:path.join(app.getPath('documents'),item.getFilename())}));
- win.on('close',event=>{if(allowClose||win.webContents.isLoadingMainFrame())return;event.preventDefault();if(closing)return;closing=true;startCloseTimer();win.webContents.send('sop:before-close');});
- win.webContents.on('render-process-gone',()=>{allowClose=true;});
+ win.on('close',event=>{
+  if(allowClose||win.webContents.isLoadingMainFrame()||win.webContents.isCrashed())return;
+  event.preventDefault();requestExit('close');
+ });
+ win.webContents.on('before-input-event',(event,input)=>{
+  if(input.type!=='keyDown'||input.alt)return;
+  const key=input.key.toLowerCase();
+  if(key!=='f5'&&!(key==='r'&&(input.control||input.meta)))return;
+  event.preventDefault();
+  if(!input.isAutoRepeat&&!win.webContents.isLoadingMainFrame())requestExit('reload',input.shift);
+ });
+ win.webContents.on('render-process-gone',()=>{clearTimeout(exitTimer);pendingExit=null;restartRequested=false;});
  win.loadURL(origin+'/index.html');
  const click=id=>{if(win&&!win.isDestroyed())win.webContents.executeJavaScript(`document.getElementById(${JSON.stringify(id)})?.click()`).catch(()=>{});};
  Menu.setApplicationMenu(Menu.buildFromTemplate([
@@ -57,7 +93,7 @@ if(!single)app.quit();else{
  app.whenReady().then(()=>{
   const root=path.join(__dirname,'renderer');
   protocol.handle('sop',async request=>{try{const url=new URL(request.url);if(url.host!=='app')return new Response('',{status:403});const relative=decodeURIComponent(url.pathname).replace(/^\/+/,''),file=path.resolve(root,relative||'index.html');if(!file.startsWith(root+path.sep)||!['.html','.js','.css','.png','.ico','.md'].includes(path.extname(file)))return new Response('',{status:403});const response=await net.fetch(pathToFileURL(file).toString());const headers=new Headers(response.headers);headers.set('Content-Security-Policy',"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'none'; object-src 'none'; base-uri 'none'; frame-src 'none'");return new Response(response.body,{status:response.status,headers});}catch{return new Response('',{status:404});}});
-  projectFiles=createProjectFileService({dialog,getWindow:()=>win,sessionFile:path.join(app.getPath('userData'),'project-file-session.json'),pause:()=>clearTimeout(closeTimer),resume:startCloseTimer});
+  projectFiles=createProjectFileService({dialog,getWindow:()=>win,sessionFile:path.join(app.getPath('userData'),'project-file-session.json')});
   proofFiles=createProofFiles({root:path.join(app.getPath('userData'),'proofs'),openPath:file=>shell.openPath(file)});
   updater=createUpdater({app,net,publicKey:require('node:fs').readFileSync(path.join(__dirname,'update-public.pem'),'utf8'),testMode,onState:state=>{if(win&&!win.isDestroyed())win.webContents.send('sop:update-state',state);}});
   createWindow();updater.start();proofFiles.start();

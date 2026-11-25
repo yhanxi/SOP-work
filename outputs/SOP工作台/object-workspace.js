@@ -383,7 +383,15 @@ function resolvedFlow(model,pages){
  const names=new Map();
  for(const page of pages)if(!names.has(page.processId))names.set(page.processId,page.name);
  const m=normalize(model);
- for(const o of m.objects)if(o.processId&&names.has(o.processId))o.text=(o.prefix||'')+names.get(o.processId);
+ for(const o of m.objects){
+  const oldPrefix=o.prefix||'';
+  const numberedPrefix=/^(★ )?\d+\. $/.exec(oldPrefix);
+  if(numberedPrefix){
+   o.prefix=numberedPrefix[1]||'';
+   if(o.text.startsWith(oldPrefix))o.text=o.prefix+o.text.slice(oldPrefix.length);
+  }
+  if(o.processId&&names.has(o.processId))o.text=(o.prefix||'')+names.get(o.processId);
+ }
  return m;
 }
 const flowShapes={rect:'矩形',diamond:'菱形',ellipse:'椭圆',triangle:'三角形'};
@@ -413,7 +421,6 @@ function generateFlow(rows,columns){
  };
  const edge=(from,to,route,label='')=>({id:id(),from:from.id,to:to?.id,route,label,color:'#20262b',strokeWidth:1.8});
  let previous;
- let sequence=0;
  for(const [col,group] of groups.entries()){
   const x=margin+col*step;
   let y=22;
@@ -424,7 +431,7 @@ function generateFlow(rows,columns){
    const railHeight=sides.reduce((total,side)=>total+side.h+10,0);
    if(sameColumn)y+=Math.max(40,railHeight+12);
    else if(!previous)y+=railHeight;
-   const box=node(row,x,y,220,58,(row.star?'★ ':'')+(++sequence)+'. ');
+   const box=node(row,x,y,220,58,row.star?'★ ':'');
    m.objects.push(box);
    const incoming=previous&&edge(previous,box,sameColumn?'down':'across',row.label);
    if(incoming&&!sameColumn&&hasRail)incoming.bend=x-170-(previous.x+previous.w+x)/2;
@@ -607,10 +614,71 @@ function svg(model,selection='',editing=false,{viewHeight,picked=[],imageSource=
  const dy=(height-Math.min(...ys)-Math.max(...ys))/2;
  return canvas+'<g transform="translate('+dx+' '+dy+')">'+content+'</g></svg>';
 }
-function open(input,{title='图文画布',flow=false,photos=[],availableHeight,preview=false,startCallout=false,onSave}={}){
+let activeEditor;
+function sameDraft(a,b){
+ if(a===b)return true;
+ if(!a||!b||typeof a!=='object'||typeof b!=='object')return false;
+ const keys=value=>Object.keys(value).filter(key=>value[key]!==undefined);
+ const fields=keys(a);
+ return fields.length===keys(b).length&&fields.every(key=>sameDraft(a[key],b[key]));
+}
+function trackEditor(dialog,{title,isDirty,onSave,onClose,isBusy=()=>false,message,owner=null}){
+ let prompt,saving=false;
+ const editor={dialog,owner,isDirty:()=>isBusy()||isDirty(),message,get prompting(){return !!prompt;},close,save,requestClose};
+ activeEditor=editor;
+ function close(){if(activeEditor===editor)activeEditor=null;dialog.close();onClose?.();}
+ async function save(persist=false,saveAs=false){
+  if(!dialog.open||prompt||saving)return false;
+  if(isBusy()){message?.('图片正在处理，请稍候。');return false;}
+  saving=true;
+  dialog.setAttribute('aria-busy','true');
+  try{
+   const saved=onSave(persist,saveAs);
+   dialog.inert=true;
+   if(await saved===false)return false;
+   close();return true;
+  }catch(error){
+   const failure='保存失败：'+error.message;
+   if(message)message(failure);else root.SOP?.toast?.(failure,true);
+   return false;
+  }finally{saving=false;dialog.inert=false;dialog.removeAttribute('aria-busy');}
+ }
+ async function requestClose(leaving=false){
+  if(prompt||saving)return false;
+  if(isBusy()){message?.('图片正在处理，请稍候。');return false;}
+  if(!isDirty()){
+   if(!leaving)close();
+   return true;
+  }
+  const choice=await new Promise(resolve=>{
+   prompt=document.createElement('dialog');prompt.className='file-save-prompt editor-save-prompt';
+   prompt.setAttribute('aria-labelledby','editorSavePromptTitle');
+   prompt.innerHTML='<h2 id="editorSavePromptTitle">'+esc(title)+'有未保存的更改</h2><p>'+(leaving?'保存并退出会将编辑内容写入项目文件。':'退出前要保存本次编辑吗？')+'</p><div class="dialog-foot"><button data-choice="cancel" autofocus>继续编辑</button><button data-choice="discard">放弃更改</button><button data-choice="save" class="primary">保存并退出</button></div>';
+   const finish=value=>{prompt.close();prompt.remove();prompt=null;resolve(value);};
+   prompt.oncancel=event=>{event.preventDefault();finish('cancel');};
+   prompt.querySelectorAll('[data-choice]').forEach(button=>button.onclick=()=>finish(button.dataset.choice));
+   document.body.append(prompt);prompt.showModal();
+  });
+  if(choice==='save')return save(leaving);
+  if(choice==='discard'){
+   if(!leaving)close();
+   return true;
+  }
+  return false;
+ }
+ dialog.oncancel=event=>{event.preventDefault();void requestClose();};
+ dialog.addEventListener('close',()=>{if(!dialog.open&&activeEditor===editor)activeEditor=null;},{once:true});
+ return editor;
+}
+function getActiveEditor(){return activeEditor?.dialog.open?activeEditor:null;}
+
+function open(input,{title='图文画布',flow=false,photos=[],availableHeight,preview=false,startCallout=false,onSave,owner=null}={}){
+ if(getActiveEditor())return;
  const d=document.createElement('dialog');d.className='object-dialog';let m=normalize(input),selected='',history=[],drag=null,snap=null,linkFrom='',inlineEdit=null,lastTap=null,tool='',creating=null,calloutPoint=null,propertyTextPreview=null;
  let picked=[],marquee=null,boxMode=false,guides=null;
  const drawingHeight=Number.isFinite(availableHeight)?Math.max(1,availableHeight):null;if(drawingHeight)m.height=Math.max(m.height,drawingHeight);const bounds=()=>({width:m.width,height:drawingHeight??m.height});
+ const initial=structuredClone(m);
+ let pendingPhoto=false;
  const calloutHeight=(text,width,fontSize)=>Math.ceil(rectTextWrapped(text,width,fontSize).split('\n').length*fontSize*1.2+16);
  function fitCalloutText(o){
   if(o.callout&&o.type==='rect'){
@@ -622,8 +690,21 @@ function open(input,{title='图文画布',flow=false,photos=[],availableHeight,p
   }
   return o;
  }
- d.innerHTML=`<div class="dialog-head"><div><h2>${esc(title)}</h2><small>选择形状后在画布按下并拖动绘制，松开完成，Esc 取消。拖动对象移动，四角均可缩放；箭头端点吸附后跟随目标移动、缩放；拖离可解除连接。双击形状可直接编辑文字。${flow?' 拖空白处框选。靠近对齐位置会吸附，按 Alt 自由移动。':' 复制图片后，可按 Ctrl+V 粘贴到画布。'}</small></div><button data-action="close">取消</button></div><div class="object-tools"><button data-add="rect">＋ 矩形</button><button data-add="ellipse">＋ 椭圆</button><button data-add="diamond">＋ 菱形</button><button data-add="arrow">＋ 箭头</button>${flow?'<button data-add="triangle">＋ 三角形</button><button data-action="box" aria-pressed="false">框选</button><button data-action="connect">连接节点 / 汇入主线</button>':'<button data-add="callout">点照片加标注</button><button data-action="upload">＋ 照片</button><input type="file" accept="image/png,image/jpeg,image/webp" hidden id="objectPhoto">'}<button data-action="editText">编辑文字</button><button data-action="copy">复制对象</button><button data-action="delete">删除对象</button><button data-action="undo">撤销</button><span class="object-message" aria-live="polite"></span></div><div class="object-layout"><div class="object-stage"></div><aside class="object-properties"></aside></div><div class="dialog-foot"><span>保存后写入项目；取消放弃本次画布修改。</span><button data-action="save" class="primary">${preview?'应用流程图':'保存画布'}</button></div>`;document.body.append(d);
+ d.innerHTML=`<div class="dialog-head"><div><h2>${esc(title)}</h2><small>选择形状后在画布按下并拖动绘制，松开完成，Esc 取消。拖动对象移动，四角均可缩放；箭头端点吸附后跟随目标移动、缩放；拖离可解除连接。双击形状可直接编辑文字。${flow?' 拖空白处框选。靠近对齐位置会吸附，按 Alt 自由移动。':' 复制图片后，可按 Ctrl+V 粘贴到画布。'}</small></div><button data-action="close">取消</button></div><div class="object-tools"><button data-add="rect">＋ 矩形</button><button data-add="ellipse">＋ 椭圆</button><button data-add="diamond">＋ 菱形</button><button data-add="arrow">＋ 箭头</button>${flow?'<button data-add="triangle">＋ 三角形</button><button data-action="box" aria-pressed="false">框选</button><button data-action="connect">连接节点 / 汇入主线</button>':'<button data-add="callout">点照片加标注</button><button data-action="upload">＋ 照片</button><input type="file" accept="image/png,image/jpeg,image/webp" hidden id="objectPhoto">'}<button data-action="editText">编辑文字</button><button data-action="copy">复制对象</button><button data-action="delete">删除对象</button><button data-action="undo">撤销</button><span class="object-message" aria-live="polite"></span></div><div class="object-layout"><div class="object-stage"></div><aside class="object-properties"></aside></div><div class="dialog-foot"><span>保存画布后，可在主窗口保存项目文件。</span><button data-action="save" class="primary">${preview?'应用流程图':'保存画布'}</button></div>`;document.body.append(d);
  const q=s=>d.querySelector(s),push=(model=m)=>{history.push(clone(model));if(history.length>60)history.shift();},message=t=>q('.object-message').textContent=t;
+ const pendingFields=()=>[...d.querySelectorAll('.object-properties input[data-prop], textarea[data-prop], [data-edge-label], [data-edge-width], [data-line-angle], [data-line-length]')].filter(field=>field.value!==field.defaultValue);
+ const editor=trackEditor(d,{title,owner,onClose:dispose,message,isBusy:()=>pendingPhoto,isDirty:()=>{
+  if(calloutPoint&&inlineEdit?.input.value.trim())return true;
+  if(!calloutPoint&&inlineEdit&&inlineEdit.input.value!==inlineEdit.object.text)return true;
+  return pendingFields().length>0||!sameDraft(initial,calloutPoint?.previous||(creating&&!creating.moved?history.at(-1):m));
+ },onSave:(persist,saveAs)=>{
+  for(const field of pendingFields())if(field.isConnected)field.dispatchEvent(new Event('change'));
+  if(inlineEdit)finishInline(!calloutPoint||!!inlineEdit.input.value.trim());
+  if(inlineEdit)return false;
+  if(creating&&!creating.moved){m=history.pop();creating=null;selected='';draw();}
+  return onSave?.(normalize(m),persist,saveAs);
+ }});
+ q('[data-action="close"]').onpointerdown=event=>event.preventDefault();
  const imageUrls=new Map();
  function imageSource(o){
   const source=o.rendered||o.data;
@@ -699,7 +780,7 @@ function open(input,{title='图文画布',flow=false,photos=[],availableHeight,p
    const raw=Number(angleInput.value), rightAngle=Math.round(raw/90)*90;
    if(!angleInput.reportValidity())return;
    const degrees=Math.abs(raw-rightAngle)<=4?rightAngle:raw;
-   if(!degrees)return;
+   if(!degrees||pendingPhoto)return;
    const angle=degrees*Math.PI/180, cos=Math.cos(angle), sin=Math.sin(angle);
    const size=(w,h)=>[Math.abs(cos)*w+Math.abs(sin)*h,Math.abs(sin)*w+Math.abs(cos)*h];
    async function rotate(data){
@@ -717,6 +798,7 @@ function open(input,{title='图文画布',flow=false,photos=[],availableHeight,p
     if(result==='data:,')throw Error('图片尺寸过大');
     return result;
    }
+   pendingPhoto=true;
    try {
     const data=await rotate(source);
     const rotatedPreview=rendered&&rendered!==source?await rotate(rendered):undefined;
@@ -736,6 +818,7 @@ function open(input,{title='图文画布',flow=false,photos=[],availableHeight,p
     o.aspectRatio=o.w/o.h;
     draw();
    } catch {if(button.isConnected)button.textContent='旋转失败，请重试';}
+   finally{pendingPhoto=false;}
   };
   q('.object-properties').querySelectorAll('[data-prop]').forEach(el=>{
    const key=el.dataset.prop;
@@ -752,6 +835,7 @@ function open(input,{title='图文画布',flow=false,photos=[],availableHeight,p
      if(el.value!==o.text){
       push();delete o.processId;delete o.prefix;o.text=el.value;fitCalloutText(o);m.height=Math.max(m.height,o.h);
      }
+     el.defaultValue=el.value;
      drawStage();q('[data-action="undo"]').disabled=!history.length;
     };
     return;
@@ -816,7 +900,7 @@ function open(input,{title='图文画布',flow=false,photos=[],availableHeight,p
     event.preventDefault();finishInline();
    }
   };
-  if(!calloutPoint)input.onblur=()=>finishInline();
+  if(!calloutPoint)input.onblur=()=>{if(!editor.prompting)finishInline();};
   input.focus();input.select();
   message(calloutPoint?'Enter 添加，Shift+Enter 换行，Esc 取消。':'直接输入文字；Enter 换行，Ctrl+Enter 完成，Esc 取消。');
  }
@@ -1016,20 +1100,19 @@ function open(input,{title='图文画布',flow=false,photos=[],availableHeight,p
   message(tool==='callout'?'点击照片上需要标注的位置，Esc 取消。':'请在画布按下并拖动绘制；Esc 取消。');
  });
  function action(name){
-  if(calloutPoint&&name==='save'){message('请先添加或取消当前标注。');q('[data-callout-text]').focus();return;}
-  if(tool==='callout'&&name!=='close'&&name!=='save')cancelCallout();
+  if(name==='close'){void editor.requestClose();return;}
+  if(name==='save'){void editor.save();return;}
+  if(tool==='callout')cancelCallout();
   tool='';
   if(creating){m=history.pop();creating=null;selected='';}
   if(name==='editText'){beginInline();return;}
-  if(inlineEdit)finishInline(name!=='close');
+  if(inlineEdit)finishInline();
   if(name==='box'){
    boxMode=!boxMode;linkFrom='';picked=[];selected='';draw();
    message(boxMode?'按住并拖出选择框。':'已退出框选。');return;
   }
   boxMode=false;
-  if(name==='close'){d.close();dispose();}
-  else if(name==='save'){onSave?.(normalize(m));d.close();dispose();}
-  else if(name==='undo'&&history.length){m=history.pop();picked=[];selected='';draw();}
+  if(name==='undo'&&history.length){m=history.pop();picked=[];selected='';draw();}
   else if(name==='delete'&&(picked.length||selected)){
    push();for(const key of picked.length?picked:[selected])remove(m,key);
    picked=[];selected='';draw();
@@ -1047,11 +1130,10 @@ function open(input,{title='图文画布',flow=false,photos=[],availableHeight,p
  d.querySelectorAll('[data-action]').forEach(b=>b.onclick=()=>action(b.dataset.action));
  if(!flow){
   const input=q('#objectPhoto');
-  let addingPhoto=false;
   async function addPhoto(file,{pasted=false}={}){
-   if(!file||addingPhoto)return;
+   if(!file||pendingPhoto)return;
    if(m.objects.length>=300){message('画布对象已满，请先删除不需要的对象。');return;}
-   addingPhoto=true;
+   pendingPhoto=true;
    try{
     const {data,sourceWidth,sourceHeight}=await readPhoto(file);
     if(!d.open||!d.isConnected)return;
@@ -1068,7 +1150,7 @@ function open(input,{title='图文画布',flow=false,photos=[],availableHeight,p
     selected=photo.id;picked=[];tool='';snap=null;boxMode=false;
     draw();message(pasted?'已粘贴图片，可拖动或缩放。':'已添加图片，可拖动或缩放。');
    }catch(error){if(d.open)message(error.message||'无法读取这张图片，请重新复制或从文件添加。');}
-   finally{addingPhoto=false;}
+   finally{pendingPhoto=false;}
   }
   input.onchange=()=>{const file=input.files[0];input.value='';void addPhoto(file);};
   d.onpaste=event=>{
@@ -1081,14 +1163,14 @@ function open(input,{title='图文画布',flow=false,photos=[],availableHeight,p
  }
 
  d.onkeydown=ev=>{
+ if(ev.isComposing||ev.keyCode===229)return;
  if(ev.key==='Escape'&&tool==='callout'){
-  if(ev.isComposing||ev.keyCode===229)return;
   ev.preventDefault();cancelCallout();return;
  }
  if(ev.key==='Escape'&&(marquee||boxMode||picked.length)){
   ev.preventDefault();if(drag?.group){m=history.pop()||m;drag=null;guides=null;}marquee=null;boxMode=false;picked=[];draw();return;
  }
- if(ev.key==='Escape'&&(tool||creating)){ev.preventDefault();if(creating){m=history.pop();creating=null;selected='';}tool='';snap=null;draw();message('已取消绘制');return;}if(/INPUT|TEXTAREA|SELECT/.test(ev.target.tagName))return;if(ev.key==='F2'){ev.preventDefault();beginInline();return;}if(ev.key==='Delete'){ev.preventDefault();action('delete');}if((ev.ctrlKey||ev.metaKey)&&ev.key.toLowerCase()==='z'){ev.preventDefault();action('undo');}if((ev.ctrlKey||ev.metaKey)&&ev.key.toLowerCase()==='d'){ev.preventDefault();action('copy');}};d.oncancel=dispose;draw();if(drawingHeight)message(contentHeight(m)>drawingHeight?'白色区域为文字之外的可用画布；灰色区域有超出元素，请手动移回或缩小。':'白色区域为文字之外的可用画布；文字和图片不自动缩放。');d.showModal();if(!flow){q('.object-stage').focus({preventScroll:true});if(startCallout)q('[data-add="callout"]').click();}
+ if(ev.key==='Escape'&&(tool||creating)){ev.preventDefault();if(creating){m=history.pop();creating=null;selected='';}tool='';snap=null;draw();message('已取消绘制');return;}if(/INPUT|TEXTAREA|SELECT/.test(ev.target.tagName))return;if(ev.key==='F2'){ev.preventDefault();beginInline();return;}if(ev.key==='Delete'){ev.preventDefault();action('delete');}if((ev.ctrlKey||ev.metaKey)&&ev.key.toLowerCase()==='z'){ev.preventDefault();action('undo');}if((ev.ctrlKey||ev.metaKey)&&ev.key.toLowerCase()==='d'){ev.preventDefault();action('copy');}};draw();if(drawingHeight)message(contentHeight(m)>drawingHeight?'白色区域为文字之外的可用画布；灰色区域有超出元素，请手动移回或缩小。':'白色区域为文字之外的可用画布；文字和图片不自动缩放。');d.showModal();if(!flow){q('.object-stage').focus({preventScroll:true});if(startCallout)q('[data-add="callout"]').click();}
 }
-const api={photoMaxEdge:PHOTO_MAX_EDGE,readPhoto,encodePhotoCanvas,contentHeight,attachEndpoint,syncConnections,mapPhotoAttachmentPoints,anchorPoints,nearestAnchor,resizeCorner,lineEndpoints,setLineEndpoints,lineAngle,setLineAngle,wrapText,rectTextWrapped,flowTextWidth,normalize,edgePoints,flowRoute,flowLabel,flowShapes,generateFlow,resolvedFlow,remove,duplicate,fromPhotos,restorePhotoCaptions,fromProcesses,svg,open};if(typeof module!=='undefined')module.exports=api;root.SOP_OBJECTS=api;
+const api={photoMaxEdge:PHOTO_MAX_EDGE,readPhoto,encodePhotoCanvas,contentHeight,attachEndpoint,syncConnections,mapPhotoAttachmentPoints,anchorPoints,nearestAnchor,resizeCorner,lineEndpoints,setLineEndpoints,lineAngle,setLineAngle,wrapText,rectTextWrapped,flowTextWidth,normalize,edgePoints,flowRoute,flowLabel,flowShapes,generateFlow,resolvedFlow,remove,duplicate,fromPhotos,restorePhotoCaptions,fromProcesses,svg,open,trackEditor,getActiveEditor,sameDraft};if(typeof module!=='undefined')module.exports=api;root.SOP_OBJECTS=api;
 })(typeof window==='undefined'?globalThis:window);

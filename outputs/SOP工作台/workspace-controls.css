@@ -13,6 +13,10 @@
  .editor-heading{position:relative}
  .object-dialog[open]{display:flex;flex-direction:column;height:min(900px,96dvh);max-height:96dvh}
  .object-dialog>.dialog-head,.object-dialog>.dialog-foot,.object-tools{flex:0 0 auto}
+ .editor-save-prompt{width:min(440px,94vw)}
+ .editor-save-prompt h2{font-size:18px;line-height:1.4;margin:20px 24px 0}
+ .editor-save-prompt p{color:var(--muted);line-height:1.6;margin:8px 24px 20px}
+ .editor-save-prompt .dialog-foot{flex-wrap:wrap}
  .object-layout{flex:1;min-height:0;overflow:hidden}
  .object-stage,.object-properties{min-height:0;max-height:none;overflow:auto;overscroll-behavior:contain;scrollbar-gutter:stable}
  .object-stage [data-endpoint]{cursor:crosshair}

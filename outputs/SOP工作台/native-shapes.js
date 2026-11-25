@@ -117,7 +117,7 @@ function create(doc,{nextId,paragraph}){
   const sx=Math.min(width/1500,height/850),sy=sx;
   pages.forEach((page,i)=>{
    const col=Math.floor(i/8),row=i%8,x=45+col*460,y=35+row*96;
-   p.append(nativeShape({name:'流程节点 '+(chunk*24+i+1),x:x*sx,y:y*sy,width:380*sx,height:58*sy,text:window.SOP_TEMPLATE.operationLabel(page,chunk*24+i+1)+'. '+page.name,fill:'FFFFFF',fontSize:10.5}));
+   p.append(nativeShape({name:'流程节点 '+(chunk*24+i+1),x:x*sx,y:y*sy,width:380*sx,height:58*sy,text:page.name,fill:'FFFFFF',fontSize:10.5}));
    if(i<pages.length-1){const points=row===7?[[x+380,y+29],[x+430,y+29],[x+430,64],[x+460,64]]:[[x+190,y+58],[x+190,y+96]];for(let j=0;j<points.length-1;j++)p.append(line('流程连线 '+(chunk*24+i+1)+'.'+(j+1),points[j][0]*sx,points[j][1]*sy,points[j+1][0]*sx,points[j+1][1]*sy,{arrow:j===points.length-2}));}
   });return centerFlow(p,width,height);
  }

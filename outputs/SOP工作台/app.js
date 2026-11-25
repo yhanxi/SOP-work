@@ -265,7 +265,7 @@ function operationPaper(p){if(A.layout==='wide-v2'){
 function flowNodes(){return project.frontContent?.flowManual?String(project.frontContent.flowText||'').split('\n').filter(x=>x.trim()).map(name=>({name})):uniqueProcesses().filter(p=>p.name.trim());}
 function flowImage(chunk=0){const all=flowNodes(),ps=all.slice(chunk*24,chunk*24+24),c=document.createElement('canvas');c.width=1500;c.height=850;const ctx=c.getContext('2d');ctx.fillStyle='white';ctx.fillRect(0,0,c.width,c.height);ctx.strokeStyle='#333';ctx.fillStyle='#111';ctx.lineWidth=2;ctx.font='22px Microsoft YaHei';const rows=Math.min(8,Math.max(1,ps.length)),colWidth=460,boxW=380,boxH=58,dy=96;
  if(ps.length)ctx.translate((c.width-(Math.ceil(ps.length/8)-1)*colWidth-boxW)/2-45,(c.height-(rows-1)*dy-boxH)/2-35);
- ps.forEach((p,i)=>{const col=Math.floor(i/8),row=i%8,x=45+col*colWidth,y=35+row*dy;ctx.strokeRect(x,y,boxW,boxH);ctx.textAlign='center';const label=T.operationLabel(p,chunk*24+i+1)+'. '+p.name;let text=label;while(ctx.measureText(text).width>boxW-20&&text.length>1)text=text.slice(0,-2)+'…';ctx.fillText(text,x+boxW/2,y+36);if(i<ps.length-1){let tx=x+boxW/2,ty=y+boxH,nx=tx,ny=y+dy;if(row===7){tx=x+boxW;ty=y+boxH/2;nx=x+colWidth+boxW/2;ny=35;}ctx.beginPath();ctx.moveTo(tx,ty);if(row===7){ctx.lineTo(x+colWidth-30,ty);ctx.lineTo(x+colWidth-30,64);ctx.lineTo(nx-190,64);ctx.stroke();ctx.beginPath();ctx.moveTo(nx-190,64);ctx.lineTo(nx-201,58);ctx.lineTo(nx-201,70);}else{ctx.lineTo(nx,ny);ctx.stroke();ctx.beginPath();ctx.moveTo(nx,ny);ctx.lineTo(nx-6,ny-11);ctx.lineTo(nx+6,ny-11);}ctx.closePath();ctx.fill();}});return c.toDataURL('image/png');}
+ ps.forEach((p,i)=>{const col=Math.floor(i/8),row=i%8,x=45+col*colWidth,y=35+row*dy;ctx.strokeRect(x,y,boxW,boxH);ctx.textAlign='center';let text=p.name;while(ctx.measureText(text).width>boxW-20&&text.length>1)text=text.slice(0,-2)+'…';ctx.fillText(text,x+boxW/2,y+36);if(i<ps.length-1){let tx=x+boxW/2,ty=y+boxH,nx=tx,ny=y+dy;if(row===7){tx=x+boxW;ty=y+boxH/2;nx=x+colWidth+boxW/2;ny=35;}ctx.beginPath();ctx.moveTo(tx,ty);if(row===7){ctx.lineTo(x+colWidth-30,ty);ctx.lineTo(x+colWidth-30,64);ctx.lineTo(nx-190,64);ctx.stroke();ctx.beginPath();ctx.moveTo(nx-190,64);ctx.lineTo(nx-201,58);ctx.lineTo(nx-201,70);}else{ctx.lineTo(nx,ny);ctx.stroke();ctx.beginPath();ctx.moveTo(nx,ny);ctx.lineTo(nx-6,ny-11);ctx.lineTo(nx+6,ny-11);}ctx.closePath();ctx.fill();}});return c.toDataURL('image/png');}
 function flowNoteText(){return window.SOP_WORD?.flowNoteText(project)??'注：□表示一般操作，◇表示检查及测试。★代表关键工序，▲代表特殊工序';}
 function frontPaper(f){
  const c=project.frontContent||{},original=project.originalFront?.[f.kind];
@@ -593,11 +593,9 @@ function configureFlow(){
   try{
    if(configured.some(row=>row.role!=='omit'&&!row.name))throw Error('请填写独立步骤的名称。');
    const graph=window.SOP_OBJECTS.generateFlow(configured,columns);
-   window.SOP_OBJECTS.open(graph,{title:'流程图生成预览',flow:true,preview:true,onSave:value=>{
-    snapshot();
-    project.frontContent={...project.frontContent,flowSetup:{rows:configured,columns},flowGraph:value,flowMode:'editable'};
-    dialog.close();renderEditor();changed();refresh();
-   }});
+   window.SOP_OBJECTS.open(graph,{title:'流程图生成预览',flow:true,preview:true,owner:dialog,onSave:(value,persist,saveAs)=>commitEditorChange(target=>{
+    target.frontContent={...target.frontContent,flowSetup:{rows:configured,columns},flowGraph:value,flowMode:'editable'};
+   },persist,saveAs,()=>dialog.close())});
   }catch(error){$('#flowConfigError').textContent=error.message;}
  };
  draw();
@@ -607,7 +605,9 @@ const coverMetaFields=[['product','产品型号'],...T.coverFields,...T.coverSig
 function renderFrontEditor(kind){$('.tabs').hidden=true;if(project.originalFront?.[kind]&&project.frontContent?.[kind+'Mode']!=='editable'){const host=$('#editContent');$('#editorTitle').textContent=frontNames[kind];$('#selectedContext').textContent='原稿保留 · 不计工序页码';host.innerHTML='<div class="notice"><strong>当前使用导入原稿</strong><p>原始 Word 对象与版式已单独保留。修改工序、文档信息或排序不会替换此页。浏览器仅尽力显示原图文，复杂分组、特殊图形及字体请在 Word/WPS 核对；本预览未生成替代顺序图。</p><p>原稿封面的编号、名称、版本、日期和左侧姓名可局部修改。右侧签字栏留作打印后手写。未知布局请在导出后核对；重排副本和原始 Word 分别保留。</p></div><button id="downloadOriginalWord">导出保留原始 Word</button><button id="convertFront" class="primary">'+(kind==='flow'?'建立可编辑流程副本':'建立版式编辑副本')+'</button>';if(kind==='cover'){host.insertAdjacentHTML('beforeend', [['number','文件编号'],['product','产品型号'],['title','文件名称'],['bare','裸机成品料号'],['packed','包装成品料号'],['version','版本'],['date','生效日期'],['author','制定'],['reviewer','审核'],['approver','批准'],['qualitySigner','质量会签'],['productionSigner','生产会签']].map(([key,label])=>'<label class="field"><span>'+label+'</span><input data-original-meta="'+key+'" value="'+esc(project.meta[key]||'')+'"></label>').join(''));host.querySelectorAll('[data-original-meta]').forEach(input=>bindInput(input,value=>project.meta[input.dataset.originalMeta]=value));}if(kind==='flow'){host.insertAdjacentHTML('beforeend','<label class="field"><span>流程图下方说明栏</span><textarea id="flowNoteInput" rows="3">'+esc(flowNoteText())+'</textarea></label>');bindInput($('#flowNoteInput'),value=>{project.frontContent={...project.frontContent,flowNote:value};});host.insertAdjacentHTML('beforeend','<button id="seedFlowGraph">配置并生成</button>');$('#seedFlowGraph').onclick=configureFlow;}$('#downloadOriginalWord').onclick=async()=>{try{download(await window.SOP_WORD.exportOriginal(project),filename()+'_原始Word.docx');}catch(err){toast(err.message,true);}};$('#convertFront').onclick=()=>{snapshot();project.frontContent={...project.frontContent,[kind+'Mode']:'editable'};if(kind==='flow'&&!project.frontContent.flowGraph){const converted=window.SOP_WORD.convertOriginalFlow(project);project.frontContent.flowGraph=converted.model;project.frontContent.flowConversion=converted.notice;}renderEditor();changed();refresh();};return;}const e=$('#editContent'),c=project.frontContent||{},m=project.meta;$('#editorTitle').textContent=frontNames[kind];$('#selectedContext').textContent='整页内容可编辑 · 可拖动或移动到任意位置';const field=(label,key,value,target='front')=>'<label class="field"><span>'+label+'</span><input data-front-target="'+target+'" data-front-key="'+key+'" value="'+esc(value)+'"></label>';
  if(kind==='cover'){e.innerHTML=field('页眉标题','coverHeading',c.coverHeading??'三阶文件')+field('公司名称','company',project.settings.company,'settings')+coverMetaFields.map(([key,label])=>field(label,key,m[key]||'','meta')).join('');}
  else if(kind==='history'){e.innerHTML=field('页面标题','historyTitle',c.historyTitle??'文件修改履历')+'<div class="notice">直接修改、添加或删除履历。每页最多 15 条记录。</div><div id="frontHistoryRows"></div><button id="addHistoryRow">＋ 添加履历</button>';const host=$('#frontHistoryRows');project.history.forEach((row,i)=>{const div=document.createElement('div');div.className='notice';div.innerHTML='<strong>履历 '+(i+1)+'</strong>'+T.historyFields.map(([key,label])=>'<label><span>'+label+'</span><input data-history-row="'+i+'" data-history-key="'+key+'" value="'+esc(row[key])+'"></label>').join('')+'<button data-delete-history="'+i+'">删除此条</button>';host.append(div);});$$('[data-history-row]').forEach(input=>bindInput(input,value=>project.history[Number(input.dataset.historyRow)][input.dataset.historyKey]=value));$$('[data-delete-history]').forEach(button=>button.onclick=()=>{snapshot();project.history.splice(Number(button.dataset.deleteHistory),1);renderFrontEditor(kind);changed();refresh();});$('#addHistoryRow').onclick=()=>{if(project.history.length>=15)return toast('此页最多 15 条，请归档后再添加。');snapshot();project.history.push({});renderFrontEditor(kind);changed();refresh();};}
- else{e.innerHTML=field('页面标题','flowTitle',c.flowTitle??'工艺流程图')+'<label class="field"><span>流程图下方说明栏</span><textarea id="flowNoteInput" rows="3" data-front-target="front" data-front-key="flowNote">'+esc(flowNoteText())+'</textarea></label><div class="notice">可按主工序和预装支线生成流程图，也可以打开画布手动调整连线。'+esc(c.flowConversion||'')+'</div><button id="editFlowGraph" class="primary">打开流程图画布</button><button id="seedFlowGraph">配置并生成</button>';$('#editFlowGraph').onclick=()=>{try{let model=c.flowGraph&&window.SOP_OBJECTS.resolvedFlow(c.flowGraph,project.pages);if(!model)model=c.flowManual?window.SOP_OBJECTS.fromProcesses(String(c.flowText||'').split('\n').filter(Boolean).map((name,i)=>({name,processId:String(i)}))):window.SOP_OBJECTS.fromProcesses(project.pages);window.SOP_OBJECTS.open(model,{title:'流程图画布',flow:true,onSave:value=>{snapshot();project.frontContent={...project.frontContent,flowGraph:value,flowMode:'editable'};renderEditor();changed();refresh();}});}catch(error){toast(error.message,true);}};$('#seedFlowGraph').onclick=configureFlow;}
+ else{e.innerHTML=field('页面标题','flowTitle',c.flowTitle??'工艺流程图')+'<label class="field"><span>流程图下方说明栏</span><textarea id="flowNoteInput" rows="3" data-front-target="front" data-front-key="flowNote">'+esc(flowNoteText())+'</textarea></label><div class="notice">可按主工序和预装支线生成流程图，也可以打开画布手动调整连线。'+esc(c.flowConversion||'')+'</div><button id="editFlowGraph" class="primary">打开流程图画布</button><button id="seedFlowGraph">配置并生成</button>';$('#editFlowGraph').onclick=()=>{try{let model=c.flowGraph&&window.SOP_OBJECTS.resolvedFlow(c.flowGraph,project.pages);if(!model)model=c.flowManual?window.SOP_OBJECTS.fromProcesses(String(c.flowText||'').split('\n').filter(Boolean).map((name,i)=>({name,processId:String(i)}))):window.SOP_OBJECTS.fromProcesses(project.pages);window.SOP_OBJECTS.open(model,{title:'流程图画布',flow:true,onSave:(value,persist,saveAs)=>commitEditorChange(target=>{
+ target.frontContent={...target.frontContent,flowGraph:value,flowMode:'editable'};
+},persist,saveAs)});}catch(error){toast(error.message,true);}};$('#seedFlowGraph').onclick=configureFlow;}
  if(project.originalFront?.[kind]){e.insertAdjacentHTML('afterbegin','<button id="useOriginalFront">切回保留的原稿</button><div class="notice">当前为工作台编辑副本。原稿仍随项目保存。</div>');$('#useOriginalFront').onclick=()=>{snapshot();project.frontContent={...project.frontContent,[kind+'Mode']:'original'};renderEditor();changed();refresh();};}
  $$('[data-front-key]').forEach(input=>bindInput(input,value=>{if(input.dataset.frontTarget==='front')project.frontContent={...project.frontContent,[input.dataset.frontKey]:value};else project[input.dataset.frontTarget][input.dataset.frontKey]=value;}));
 }
@@ -779,6 +779,18 @@ function renderEditor(){if(String(selected).startsWith('front:'))return renderFr
  if(editNumber)editNumber.onclick=editProcessNumber;
  refreshProcessNumberWarning();
 }
+function commitEditorChange(update,persist,saveAs,afterCommit){
+ const commit=()=>{
+  snapshot();update(project);
+  afterCommit?.();
+  renderEditor();changed();refresh();
+ };
+ if(!persist){commit();return true;}
+ // Stage the file contents without changing the project or its undo history.
+ const candidate={...project,pages:project.pages.slice()};
+ update(candidate);
+ return projectFiles.save(saveAs,{project:projectForStorage(candidate),commit});
+}
 async function openPageCanvas(p,{startCallout=false}={}){
  const button=$('#editPageCanvas'),source=p.canvas||p.canvasDraft;
  if(!button||button.disabled)return;
@@ -800,13 +812,15 @@ async function openPageCanvas(p,{startCallout=false}={}){
   }
   const space=canvasSpace(p,model);
   if(space.textOverflow)return toast('文字已占满内容框，请先调整文字，留出画布空间。',true);
-  window.SOP_OBJECTS.open(model,{availableHeight:space.height,title:'工序图文画布',startCallout,onSave:value=>{
-   snapshot();
-   p.canvas=value;
-   if(source&&p.canvasDraft===source)delete p.canvasDraft;
-   p.fitSinglePage=false;
-   renderEditor();changed();refresh();
-   if(compressed)toast('已压缩 '+compressed+' 张转入画布的照片，普通图文里的原配图仍可恢复。');
+  window.SOP_OBJECTS.open(model,{availableHeight:space.height,title:'工序图文画布',startCallout,onSave:(value,persist,saveAs)=>{
+   if(!project.pages.includes(p)||p.fixed.includes('photos'))return false;
+   return commitEditorChange(target=>{
+    const i=target.pages.indexOf(p),saved={...p,canvas:value,fitSinglePage:false};
+    if(source&&p.canvasDraft===source)delete saved.canvasDraft;
+    target.pages[i]=saved;
+   },persist,saveAs,()=>{
+    if(compressed)toast('已压缩 '+compressed+' 张转入画布的照片，普通图文里的原配图仍可恢复。');
+   });
   }});
  }catch(error){if(page()===p)toast('画布图片加载失败：'+error.message,true);}
  finally{if(button.isConnected)button.disabled=p.fixed.includes('photos');}
@@ -1073,7 +1087,7 @@ async function printPdf(){
  finally{button.disabled=false;}
 }
 async function flushSave(){clearTimeout(saveTimer);if(!autosaveReady)throw Error('本机恢复缓存不可用，请点击“保存”写入项目文件。');await dbWrite(projectForStorage(project));lastSaved=revision;}
-if(window.sopDesktop){$('#printBtn').textContent='保存 PDF';window.sopDesktop.onBeforeClose(()=>projectFiles.beforeClose());}
+if(window.sopDesktop){$('#printBtn').textContent='保存 PDF';window.sopDesktop.onBeforeClose(reason=>projectFiles.beforeClose(reason));}
 function renderPresets(){for(const [hostId,input,label,isBackground]of [['textColorPresets','annotationColor','文字 / 线条',false],['backgroundPresets','annotationBackground','文字背景',true]]){SOP_COLORS.mount($('#'+hostId),{value:isBackground&&$('#annotationTransparent').checked?'transparent':$('#'+input).value,label,transparent:isBackground,onChange:color=>{if(color!=='transparent')$('#'+input).value=color;if(isBackground)$('#annotationTransparent').checked=color==='transparent';renderPresets();}});}}
 
 for(const id of ['annotationColor','annotationBackground','annotationTransparent'])$('#'+id).addEventListener('input',()=>{if(id==='annotationBackground')$('#annotationTransparent').checked=false;renderPresets();});
@@ -1082,16 +1096,34 @@ async function openPhoto(id){
  if(!ph||p.fixed.includes('photos'))return;
  try{
   const im=await loadImage(ph.data);
-  if(page()!==p||!currentPhotos(p).includes(ph)||$('#photoDialog').open)return;
-  photoEdit={page:p,canvas:p.canvas,original:ph,photo:{...clone(ph),marks:clone(ph.marks||[])},im,tool:'arrow',drag:null,crop:null,pointTransforms:[]};
-  $('#photoDialog').showModal();renderPresets();$$('[data-tool]').forEach(b=>b.classList.toggle('active',b.dataset.tool==='arrow'));renderCanvas();
+  if(page()!==p||!currentPhotos(p).includes(ph)||window.SOP_OBJECTS.getActiveEditor())return;
+  const dialog=$('#photoDialog'),edit=photoEdit={page:p,canvas:p.canvas,original:ph,photo:{...clone(ph),marks:clone(ph.marks||[])},im,tool:'arrow',drag:null,crop:null,pointTransforms:[]};
+  edit.editor=window.SOP_OBJECTS.trackEditor(dialog,{title:'图片标注',isDirty:()=>photoDraftChanged(edit),
+   isBusy:()=>edit.transforming,message:text=>{$('#cropHint').textContent=text;},onClose:()=>{photoEdit=null;},
+   onSave:(persist,saveAs)=>savePhotoEdit(edit,persist,saveAs)});
+  dialog.showModal();renderPresets();$$('[data-tool]').forEach(b=>b.classList.toggle('active',b.dataset.tool==='arrow'));renderCanvas();
  }catch(error){toast('图片打开失败：'+error.message,true);}
 }
 function renderCanvas(){if(!photoEdit)return;const c=$('#annotationCanvas'),im=photoEdit.im,scale=Math.min(1,940/im.width,510/im.height);const pixelRatio=Math.max(2,window.devicePixelRatio||1);c.width=Math.round(im.width*scale*pixelRatio);c.height=Math.round(im.height*scale*pixelRatio);c.style.width=Math.round(im.width*scale)+'px';const ctx=c.getContext('2d');ctx.drawImage(im,0,0,c.width,c.height);drawMarks(ctx,photoEdit.photo.marks,c.width,c.height);if(photoEdit.drag&&photoEdit.tool!=='crop')drawMarks(ctx,[photoEdit.drag],c.width,c.height);const r=photoEdit.crop||(photoEdit.tool==='crop'?photoEdit.drag:null);if(r){ctx.strokeStyle='#0c78d4';ctx.lineWidth=2;ctx.setLineDash([6,5]);ctx.strokeRect(r.x*c.width,r.y*c.height,(r.x2-r.x)*c.width,(r.y2-r.y)*c.height);ctx.setLineDash([]);}$('#cropHint').textContent=photoEdit.tool==='crop'?'拖动选择范围，再点击“应用裁剪”。':'';}
 const point=e=>{const r=$('#annotationCanvas').getBoundingClientRect();return {x:Math.max(0,Math.min(1,(e.clientX-r.left)/r.width)),y:Math.max(0,Math.min(1,(e.clientY-r.top)/r.height))};};
 $('#annotationCanvas').onpointerdown=e=>{if(!photoEdit||photoEdit.transforming)return;const p=point(e),m={type:photoEdit.tool,...p,x2:p.x,y2:p.y,color:$('#annotationColor').value,text:$('#annotationText').value,background:$('#annotationTransparent').checked?'transparent':$('#annotationBackground').value,fontSize:Number($('#annotationSize').value)};if(photoEdit.tool==='text'){photoEdit.photo.marks.push(m);renderCanvas();return;}photoEdit.drag=m;e.currentTarget.setPointerCapture(e.pointerId);};
 $('#annotationCanvas').onpointermove=e=>{if(!photoEdit?.drag)return;const p=point(e);photoEdit.drag.x2=p.x;photoEdit.drag.y2=p.y;renderCanvas();};
-$('#annotationCanvas').onpointerup=()=>{if(!photoEdit?.drag)return;const d=photoEdit.drag;if(Math.abs(d.x-d.x2)+Math.abs(d.y-d.y2)>.015){if(photoEdit.tool==='crop')photoEdit.crop=d;else photoEdit.photo.marks.push(d);}photoEdit.drag=null;renderCanvas();};
+const photoDragChanged=drag=>drag&&Math.abs(drag.x-drag.x2)+Math.abs(drag.y-drag.y2)>.015;
+function photoDraftChanged(edit){
+ return !!edit.crop||photoDragChanged(edit.drag)||edit.photo.data!==edit.original.data||
+  !window.SOP_OBJECTS.sameDraft(edit.photo.marks,edit.original.marks||[]);
+}
+function finishPhotoDrag(){
+ if(!photoEdit?.drag)return;
+ const drag=photoEdit.drag;
+ if(photoDragChanged(drag)){
+  if(photoEdit.tool==='crop')photoEdit.crop=drag;
+  else photoEdit.photo.marks.push(drag);
+ }
+ photoEdit.drag=null;renderCanvas();
+}
+$('#annotationCanvas').onpointerup=finishPhotoDrag;
+$('#annotationCanvas').onpointercancel=()=>{if(photoEdit){photoEdit.drag=null;renderCanvas();}};
 $$('[data-tool]').forEach(b=>b.onclick=()=>{photoEdit.tool=b.dataset.tool;photoEdit.drag=null;$$('[data-tool]').forEach(x=>x.classList.toggle('active',x===b));renderCanvas();});$('#markUndo').onclick=()=>{if(!photoEdit||photoEdit.transforming)return;photoEdit.photo.marks.pop();renderCanvas();};
 async function transformPhoto(paint,remapMarks,mapPoint){
  const edit=photoEdit;
@@ -1109,9 +1141,10 @@ async function transformPhoto(paint,remapMarks,mapPoint){
   edit.photo.height=image.naturalHeight;
   edit.im=image;
   edit.crop=null;
-  renderCanvas();
+  renderCanvas();return true;
  }catch(error){
   if(photoEdit===edit)toast('图片处理失败：'+error.message,true);
+  return false;
  }finally{edit.transforming=false;}
 }
 $('#rotatePhoto').onclick=()=>transformPhoto((canvas,image)=>{
@@ -1128,11 +1161,11 @@ $('#rotatePhoto').onclick=()=>transformPhoto((canvas,image)=>{
  }
  return marks;
 },(x,y)=>[1-y,x]);
-$('#applyCrop').onclick=()=>{
- if(!photoEdit?.crop)return toast('请先拖动选择裁剪范围。');
+function applyPhotoCrop(){
+ if(!photoEdit?.crop){toast('请先拖动选择裁剪范围。');return false;}
  const crop=photoEdit.crop,x=Math.min(crop.x,crop.x2),y=Math.min(crop.y,crop.y2);
  const width=Math.abs(crop.x2-crop.x),height=Math.abs(crop.y2-crop.y);
- if(width<.02||height<.02)return;
+ if(width<.02||height<.02){toast('裁剪范围太小，请扩大选择。',true);return false;}
  return transformPhoto((canvas,image)=>{
   const w=image.naturalWidth*width,h=image.naturalHeight*height;
   canvas.width=Math.max(1,Math.round(w));
@@ -1147,28 +1180,33 @@ $('#applyCrop').onclick=()=>{
   }
   return marks.filter(mark=>mark.x>=0&&mark.x<=1&&mark.y>=0&&mark.y<=1);
  },(px,py)=>[(px-x)/width,(py-y)/height]);
-};
-$('#savePhoto').onclick=async()=>{
- const edit=photoEdit;
- if(!edit||edit.transforming)return;
- try{
-  edit.photo.rendered=await annotated(edit.photo);
-  const p=page();
-  if(photoEdit!==edit||p!==edit.page||p.canvas!==edit.canvas||p.fixed.includes('photos'))return;
-  const i=currentPhotos(p).indexOf(edit.original);
-  if(i<0)return;
-  snapshot();
-  if(p.canvas){
-   for(const transform of edit.pointTransforms)window.SOP_OBJECTS.mapPhotoAttachmentPoints(p.canvas,edit.original.id,transform);
-   updateCanvasPhoto(edit.original,edit.photo,edit.im.width,edit.im.height);
-   window.SOP_OBJECTS.syncConnections(p.canvas);
-  }
-  else p.photos[i]=edit.photo;
-  $('#photoDialog').close();photoEdit=null;renderPhotos();changed();refresh();
- }catch(error){toast('图片编辑保存失败：'+error.message,true);}
-};$('#closePhoto').onclick=()=>{$('#photoDialog').close();photoEdit=null;};
-function help(){showForm('使用说明',`<div class="help"><p><strong>页面画布：</strong>选择工序后，点击“建立页面画布”，也可双击页面进入。照片外可放文字框和箭头；拖动移动，右下角缩放，右侧编辑属性。画布固定在本页，不自动缩放或续页，可返回原图文排版，草稿仍保留。</p><p><strong>流程图：</strong>导入原稿默认保留；建立编辑副本后可拖动节点、连接两个节点、修改分支标签。转换关系需核对，可随时切回原稿。按工序生成编辑副本每张最多 24 个节点；原有自动流程续页仍保留。</p><p><strong>新建：</strong>点击“新建”，填写文档信息，再按工序添加文字与现场照片。</p><p><strong>导入：</strong>支持 SOP 项目（.sop.json）和兼容当前表格结构的 .docx。原稿图片与原生标注会保留；浏览器按工序表格预览，普通 Word 导出使用固定单页模板；原稿随项目保留。请核对超框内容与浮动标注。</p><p><strong>固定沿用：</strong>在文字、配图或物料旁点击“设为固定沿用”，普通编辑会锁定。新增和复制页面时会沿用这些内容；点击“解锁”可以修改。</p><p><strong>页面：</strong>点击“按页面”查看实际页数，可拖动正文页排序，或用“移动到…”选择移动或交换两页；封面、履历和流程图也可编辑和排序，且不计入工序页码。每个工序固定一页，不自动缩放或续页。内容过多、超框或遮挡时，请手动调整字号、图片和画布位置，或主动新增工序页。</p><p><strong>保存：</strong>编辑后会在本机保留恢复缓存。“保存”或 Ctrl+S 写入当前 .sop.json；首次保存选择位置。“另存为”或 Ctrl+Shift+S 创建另一份文件并切换到它。导入 Word 不覆盖原 Word。新建、打开和关闭前会询问未保存的更改。画布内需先保存画布。部分浏览器仅支持下载副本，请核对下载完成；不同设备不会自动同步。</p><p><strong>Word：</strong>使用原稿表格骨架导出，文字、表格、图片、标注和流程图节点/连线均可继续在 WPS/Word 中单独编辑；工作台的固定沿用不会锁定导出的 Word。页码为动态域，导出附带项目数据，可再次恢复；检测到外部 Word 修改时可选择读取现有内容。</p><p><strong>PDF：</strong>桌面版点击“预览 / PDF”后选择“保存 PDF”；浏览器版在打印窗口选择 A4 横向、缩放 100%，关闭额外页眉页脚。PDF 与此工具的打印预览使用同一页面。</p><p>第一版的浏览器预览与 Word 分页可能受字体和办公软件影响；正式发放前请打开导出的 Word 核对。数据仅存储在本机，本工具无网络请求。</p></div>`,null);}
-if(A.layout==='wide-v2')document.body.classList.add('template-v2');$('#brandLogo').src=A.appLogo||A.logo;$('#undoBtn').onclick=()=>{const s=undo.pop();if(!s)return;project=s.project;selected=s.selected;renderEditor();changed();refresh();};$('#newBtn').onclick=async()=>{try{if(!await projectFiles.guard('new'))return;await projectFiles.detach();clearTimeout(saveTimer);const settings=clone(project.settings);project={schema:'sop-studio/v1',meta:{...clone(A.seed.meta),product:'',number:'',version:'A0',bare:'',packed:''},settings,history:[],pages:[blankPage()]};undo=[];selected=project.pages[0].id;renderEditor();changed();refresh();editMetadata();}catch(error){toast('新建失败：'+error.message,true);}};$('#importBtn').onclick=()=>projectFiles.open();$('#saveBtn').onclick=()=>projectFiles.save(false);$('#saveAsBtn').onclick=()=>projectFiles.save(true);$('#metaBtn').onclick=editMetadata;$('#settingsBtn').onclick=editSettings;$('#helpBtn').onclick=help;$('#addBtn').onclick=()=>addPage(false);$('#continueBtn').onclick=()=>addPage(true);$('#copyBtn').onclick=copyPage;$('#deleteBtn').onclick=deletePage;$('#moveBtn').onclick=openMovePage;$('#upBtn').onclick=()=>movePage(-1);$('#downBtn').onclick=()=>movePage(1);$('#processView').onclick=()=>{view='process';$('#processView').classList.add('active');$('#pageView').classList.remove('active');refreshNav();};$('#pageView').onclick=()=>{view='page';$('#pageView').classList.add('active');$('#processView').classList.remove('active');refreshNav();};$$('[data-tab]').forEach(button=>button.onclick=()=>{setEditorTab(button.dataset.tab);renderEditor();});$$('.close-dialog').forEach(b=>b.onclick=()=>$('#formDialog').close());$('#previewAllBtn').onclick=()=>showFull();$('#zoomBtn').onclick=()=>showFull(Math.max(0,selectedDocumentIndex()));$('#pdfBtn').onclick=()=>showFull();$('#printBtn').onclick=printPdf;$('#closePreview').onclick=()=>$('#previewDialog').close();$('#photoFile').onchange=async e=>{await addPhotos(e.target.files);e.target.value='';};$('#replaceFile').onchange=async e=>{
+}
+$('#applyCrop').onclick=applyPhotoCrop;
+async function savePhotoEdit(edit,persist,saveAs){
+ if(!photoDraftChanged(edit))return persist?projectFiles.save(saveAs):true;
+ finishPhotoDrag();
+ if(edit.crop&&!await applyPhotoCrop())return false;
+ edit.photo.rendered=await annotated(edit.photo);
+ const p=edit.page;
+ if(photoEdit!==edit||!project.pages.includes(p)||p.canvas!==edit.canvas||p.fixed.includes('photos'))return false;
+ const i=currentPhotos(p).indexOf(edit.original);
+ if(i<0)return false;
+ let saved;
+ if(p.canvas){
+  const canvas=structuredClone(p.canvas),photo=canvas.objects.find(object=>object.id===edit.original.id);
+  for(const transform of edit.pointTransforms)window.SOP_OBJECTS.mapPhotoAttachmentPoints(canvas,photo.id,transform);
+  updateCanvasPhoto(photo,edit.photo,edit.im.width,edit.im.height);
+  window.SOP_OBJECTS.syncConnections(canvas);
+  saved={...p,canvas};
+ }else{
+  const photos=p.photos.slice();photos[i]=edit.photo;saved={...p,photos};
+ }
+ return commitEditorChange(target=>{target.pages[target.pages.indexOf(p)]=saved;},persist,saveAs);
+}
+$('#savePhoto').onclick=()=>void photoEdit?.editor.save();
+$('#closePhoto').onclick=()=>void photoEdit?.editor.requestClose();
+function help(){showForm('使用说明',`<div class="help"><p><strong>页面画布：</strong>选择工序后，点击“建立页面画布”，也可双击页面进入。照片外可放文字框和箭头；拖动移动，右下角缩放，右侧编辑属性。画布固定在本页，不自动缩放或续页，可返回原图文排版，草稿仍保留。</p><p><strong>流程图：</strong>导入原稿默认保留；建立编辑副本后可拖动节点、连接两个节点、修改分支标签。转换关系需核对，可随时切回原稿。按工序生成编辑副本每张最多 24 个节点；原有自动流程续页仍保留。</p><p><strong>新建：</strong>点击“新建”，填写文档信息，再按工序添加文字与现场照片。</p><p><strong>导入：</strong>支持 SOP 项目（.sop.json）和兼容当前表格结构的 .docx。原稿图片与原生标注会保留；浏览器按工序表格预览，普通 Word 导出使用固定单页模板；原稿随项目保留。请核对超框内容与浮动标注。</p><p><strong>固定沿用：</strong>在文字、配图或物料旁点击“设为固定沿用”，普通编辑会锁定。新增和复制页面时会沿用这些内容；点击“解锁”可以修改。</p><p><strong>页面：</strong>点击“按页面”查看实际页数，可拖动正文页排序，或用“移动到…”选择移动或交换两页；封面、履历和流程图也可编辑和排序，且不计入工序页码。每个工序固定一页，不自动缩放或续页。内容过多、超框或遮挡时，请手动调整字号、图片和画布位置，或主动新增工序页。</p><p><strong>保存：</strong>编辑后会在本机保留恢复缓存。“保存”或 Ctrl+S 写入当前 .sop.json；首次保存选择位置。“另存为”或 Ctrl+Shift+S 创建另一份文件并切换到它。导入 Word 不覆盖原 Word。新建、打开和关闭前会询问未保存的更改。画布编辑结束时可以保存、放弃更改或继续编辑。画布内按 Ctrl+S 会将当前编辑写入项目文件。部分浏览器仅支持下载副本，请核对下载完成；不同设备不会自动同步。</p><p><strong>Word：</strong>使用原稿表格骨架导出，文字、表格、图片、标注和流程图节点/连线均可继续在 WPS/Word 中单独编辑；工作台的固定沿用不会锁定导出的 Word。页码为动态域，导出附带项目数据，可再次恢复；检测到外部 Word 修改时可选择读取现有内容。</p><p><strong>PDF：</strong>桌面版点击“预览 / PDF”后选择“保存 PDF”；浏览器版在打印窗口选择 A4 横向、缩放 100%，关闭额外页眉页脚。PDF 与此工具的打印预览使用同一页面。</p><p>第一版的浏览器预览与 Word 分页可能受字体和办公软件影响；正式发放前请打开导出的 Word 核对。数据仅存储在本机，本工具无网络请求。</p></div>`,null);}
+if(A.layout==='wide-v2')document.body.classList.add('template-v2');$('#brandLogo').src=A.appLogo||A.logo;$('#undoBtn').onclick=()=>{const s=undo.pop();if(!s)return;project=s.project;selected=s.selected;renderEditor();changed();refresh();};$('#newBtn').onclick=async()=>{try{if(!await projectFiles.guard('new'))return;await projectFiles.detach();clearTimeout(saveTimer);const settings=clone(project.settings);project={schema:'sop-studio/v1',meta:{...clone(A.seed.meta),product:'',number:'',version:'A0',bare:'',packed:''},settings,history:[],pages:[blankPage()]};undo=[];selected=project.pages[0].id;renderEditor();changed();refresh();editMetadata();}catch(error){toast('新建失败：'+error.message,true);}};$('#importBtn').onclick=()=>projectFiles.open();$('#saveBtn').onclick=()=>saveProject(false);$('#saveAsBtn').onclick=()=>saveProject(true);$('#metaBtn').onclick=editMetadata;$('#settingsBtn').onclick=editSettings;$('#helpBtn').onclick=help;$('#addBtn').onclick=()=>addPage(false);$('#continueBtn').onclick=()=>addPage(true);$('#copyBtn').onclick=copyPage;$('#deleteBtn').onclick=deletePage;$('#moveBtn').onclick=openMovePage;$('#upBtn').onclick=()=>movePage(-1);$('#downBtn').onclick=()=>movePage(1);$('#processView').onclick=()=>{view='process';$('#processView').classList.add('active');$('#pageView').classList.remove('active');refreshNav();};$('#pageView').onclick=()=>{view='page';$('#pageView').classList.add('active');$('#processView').classList.remove('active');refreshNav();};$$('[data-tab]').forEach(button=>button.onclick=()=>{setEditorTab(button.dataset.tab);renderEditor();});$$('.close-dialog').forEach(b=>b.onclick=()=>$('#formDialog').close());$('#previewAllBtn').onclick=()=>showFull();$('#zoomBtn').onclick=()=>showFull(Math.max(0,selectedDocumentIndex()));$('#pdfBtn').onclick=()=>showFull();$('#printBtn').onclick=printPdf;$('#closePreview').onclick=()=>$('#previewDialog').close();$('#photoFile').onchange=async e=>{await addPhotos(e.target.files);e.target.value='';};$('#replaceFile').onchange=async e=>{
  const file=e.target.files[0],target=replacePhotoTarget;
  e.target.value='';replacePhotoTarget=null;
  if(!file||!target)return;
@@ -1264,7 +1302,23 @@ proofButton.onclick=async()=>{
  finally{proofButton.disabled=false;proofButton.textContent=proofLabel;}
 };
 window.SOP={projectForStorage,validateProjectedPages,canvasSpace,operationPhotoLayout,textStyle,bodyLines,snapshot,changed,renderEditor,moveDocumentPage,orderedPages,moveRenderedPage,get project(){return project;},get layout(){return layout;},get front(){return front;},uid,clone,esc,blankPage,validate,annotated,prepareImages,recalc,refresh,operationPaper,frontPaper,flowImage,toast,download,filename,replaceProject(p){snapshot();project=validate(p);selected=p.pages[0]?.id;renderEditor();changed();refresh();},setSelected(id){selected=id;renderEditor();refresh();}};
-projectFiles=window.SOP_FILES.create({getProject:()=>projectForStorage(project),filename,toast,download,stateText:p=>window.SOP_IMPORT.projectState(p),recover:flushSave,applyProject:async(p,commit)=>{const candidate=validate(p);await prepareImages(candidate);await commit();clearTimeout(saveTimer);project=candidate;undo=[];selected=project.pages[0]?.id;renderEditor();changed();refresh();}});
-document.addEventListener('keydown',event=>{if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='s'){event.preventDefault();projectFiles.save(event.shiftKey);}});if(!window.sopDesktop){window.addEventListener('beforeunload',event=>projectFiles.beforeUnload(event));}
+projectFiles=window.SOP_FILES.create({getProject:()=>projectForStorage(project),filename,toast,download,stateText:p=>window.SOP_IMPORT.projectState(p),getEditor:window.SOP_OBJECTS.getActiveEditor,recover:flushSave,applyProject:async(p,commit)=>{const candidate=validate(p);await prepareImages(candidate);await commit();clearTimeout(saveTimer);project=candidate;undo=[];selected=project.pages[0]?.id;renderEditor();changed();refresh();}});
+function saveProject(saveAs){
+ const editor=window.SOP_OBJECTS.getActiveEditor();
+ return editor?editor.save(true,saveAs):projectFiles.save(saveAs);
+}
+let workspaceReloadApproved=false;
+document.addEventListener('keydown',async event=>{
+ if(event.isComposing||event.keyCode===229)return;
+ const key=event.key.toLowerCase(),modifier=event.ctrlKey||event.metaKey;
+ if(modifier&&key==='s'){
+  event.preventDefault();void saveProject(event.shiftKey);
+ }
+ if(!window.sopDesktop&&window.SOP_OBJECTS.getActiveEditor()&&(key==='f5'||modifier&&key==='r')){
+  event.preventDefault();
+  if((await projectFiles.beforeClose('reload')).ok){workspaceReloadApproved=true;window.location.reload();}
+ }
+},true);
+if(!window.sopDesktop)window.addEventListener('beforeunload',event=>{if(!workspaceReloadApproved)projectFiles.beforeUnload(event);});
 (async()=>{let saved,meta;try{db=await openDb();saved=await dbRead();if(saved){project=validate(saved);selected=project.pages[0]?.id;}meta=await dbRead('fileBinding');autosaveReady=true;document.body.dataset.recovery='saved';}catch(e){document.body.dataset.recovery='failed';}await prepareImages();renderEditor();refresh();await projectFiles.restore(meta,!!saved);})();
 })();
