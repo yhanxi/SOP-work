@@ -3,13 +3,19 @@
 'use strict';
 const clone=x=>JSON.parse(JSON.stringify(x)),id=()=>globalThis.crypto?.randomUUID?.()||'obj-'+Math.random().toString(36).slice(2),esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let renderId=0;
-const styleKey='sop-object-styles-v1';let remembered={};try{remembered=JSON.parse(root.localStorage?.getItem(styleKey)||'{}')||{};}catch{}
+const styleKey='sop-object-styles-v1';let remembered={};
+try{
+ remembered=JSON.parse(root.localStorage?.getItem(styleKey)||'{}')||{};
+ remembered.rect??=remembered.callout;
+ delete remembered.callout;
+}catch{remembered={};}
 function remember(o){remembered[o.type]={fontSize:o.fontSize,color:o.color,fill:o.fill,strokeWidth:o.strokeWidth};try{root.localStorage?.setItem(styleKey,JSON.stringify(remembered));}catch{}}
 
 const finite=(n,f)=>Number.isFinite(Number(n))?Number(n):f;
+const newShape=(type,geometry)=>({id:id(),type,text:'',fill:'#ffffff',...remembered[type],...geometry});
 function normalize(input,interactive=false){
  const m=interactive?{...input,objects:input.objects.map(o=>({...o}))}:clone(input||{width:900,height:520,objects:[],edges:[]});m.width=Math.max(100,Math.min(4000,finite(m.width,900)));m.height=Math.max(100,Math.min(4000,finite(m.height,520)));m.objects=Array.isArray(m.objects)?m.objects:[];m.edges=Array.isArray(m.edges)?m.edges:[];
- const seen=new Set();m.objects=m.objects.filter(o=>['photo','text','rect','ellipse','diamond','triangle','arrow','line'].includes(o.type)).slice(0,300).map(o=>{o.id=o.id&&!seen.has(o.id)?o.id:id();seen.add(o.id);o.w=Math.max(['line','arrow'].includes(o.type)?0:10,Math.min(m.width,finite(o.w,180)));o.h=Math.max(['line','arrow'].includes(o.type)?0:10,Math.min(m.height,finite(o.h,60)));if(['line','arrow'].includes(o.type))o.w=Math.max(0,Math.min(m.width,finite(o.w,180)));o.x=Math.max(0,Math.min(m.width-o.w,finite(o.x,30)));o.y=Math.max(0,Math.min(m.height-o.h,finite(o.y,30)));o.strokeWidth=Math.max(.5,Math.min(20,finite(o.strokeWidth,['arrow','line'].includes(o.type)?3:2)));o.fontSize=Math.max(8,Math.min(80,finite(o.fontSize,20)));o.color=/^#[a-f\d]{6}$/i.test(o.color)?o.color:'#243e46';o.fill=/^#[a-f\d]{6}$/i.test(o.fill)?o.fill:'transparent';o.text=String(o.text||'');if(o.type==='photo'){o.aspectRatio=finite(o.aspectRatio,o.w/Math.max(1,o.h));o.h=o.w/Math.max(.01,o.aspectRatio);if(o.h>m.height-o.y){o.h=m.height-o.y;o.w=o.h*o.aspectRatio;}}if(!interactive&&o.type==='photo'&&!/^data:image\/(png|jpeg|webp);base64,[a-z\d+/=]+$/i.test(o.data||''))throw Error('画布图片必须是本地 PNG、JPEG 或 WebP 数据');return o;});
+ const seen=new Set();m.objects=m.objects.filter(o=>['photo','text','rect','ellipse','diamond','triangle','arrow','line'].includes(o.type)).slice(0,300).map(o=>{if(o.type==='text'&&o.callout===true)o.type='rect';o.id=o.id&&!seen.has(o.id)?o.id:id();seen.add(o.id);o.w=Math.max(['line','arrow'].includes(o.type)?0:10,Math.min(m.width,finite(o.w,180)));o.h=Math.max(['line','arrow'].includes(o.type)?0:10,Math.min(m.height,finite(o.h,60)));if(['line','arrow'].includes(o.type))o.w=Math.max(0,Math.min(m.width,finite(o.w,180)));o.x=Math.max(0,Math.min(m.width-o.w,finite(o.x,30)));o.y=Math.max(0,Math.min(m.height-o.h,finite(o.y,30)));o.strokeWidth=Math.max(.5,Math.min(20,finite(o.strokeWidth,['arrow','line'].includes(o.type)?3:2)));o.fontSize=Math.max(8,Math.min(80,finite(o.fontSize,20)));o.color=/^#[a-f\d]{6}$/i.test(o.color)?o.color:'#243e46';o.fill=/^#[a-f\d]{6}$/i.test(o.fill)?o.fill:'transparent';o.text=String(o.text||'');if(o.type==='photo'){o.aspectRatio=finite(o.aspectRatio,o.w/Math.max(1,o.h));o.h=o.w/Math.max(.01,o.aspectRatio);if(o.h>m.height-o.y){o.h=m.height-o.y;o.w=o.h*o.aspectRatio;}}if(!interactive&&o.type==='photo'&&!/^data:image\/(png|jpeg|webp);base64,[a-z\d+/=]+$/i.test(o.data||''))throw Error('画布图片必须是本地 PNG、JPEG 或 WebP 数据');return o;});
  const direct=new Set(m.edges.filter(e=>!e.join&&seen.has(e.from)&&seen.has(e.to)&&e.from!==e.to).map(e=>e.id));
  m.edges=m.edges.filter(e=>seen.has(e.from)&&(e.join?direct.has(e.join):seen.has(e.to)&&e.from!==e.to)).map(e=>({...e,id:e.id||id(),label:String(e.label||''),strokeWidth:Math.max(.5,Math.min(20,finite(e.strokeWidth,2))),color:/^#[a-f\d]{6}$/i.test(e.color)?e.color:'#243e46'}));syncConnections(m);return m;
 }
@@ -21,6 +27,24 @@ function anchorPoints(o){
  const vertices=o.type==='diamond'?[[o.x+o.w/2,o.y],[o.x+o.w,o.y+o.h/2],[o.x+o.w/2,o.y+o.h],[o.x,o.y+o.h/2]]:[[o.x,o.y],[o.x+o.w,o.y],[o.x+o.w,o.y+o.h],[o.x,o.y+o.h]];
  return [...vertices.map(([x,y])=>({x,y,kind:'corner'})),...vertices.map(([x,y],i)=>({x:(x+vertices[(i+1)%4][0])/2,y:(y+vertices[(i+1)%4][1])/2,kind:'midpoint'}))];
 }
+function facingEdgeAnchor(rect,point,previous){
+ // Anchor slots 4–7 are the top, right, bottom and left midpoints.
+ const outside=[point.y<=rect.y,point.x>=rect.x+rect.w,point.y>=rect.y+rect.h,point.x<=rect.x];
+ const inside=!outside.some(Boolean);
+ const candidates=anchorPoints(rect).slice(4).map((anchor,i)=>({
+  index:i+4,distance:Math.hypot(point.x-anchor.x,point.y-anchor.y)
+ })).filter((_,i)=>inside||outside[i]);
+ const nearest=candidates.reduce((best,anchor)=>anchor.distance<best.distance?anchor:best);
+ const current=candidates.find(anchor=>anchor.index===previous);
+ const tolerance=Math.min(6,Math.min(rect.w,rect.h)*.1);
+ return current&&current.distance<=nearest.distance+tolerance?current.index:nearest.index;
+}
+function photoAt(model,{x,y}){
+ return model.objects.findLast(o=>o.type==='photo'&&x>=o.x&&x<=o.x+o.w&&y>=o.y&&y<=o.y+o.h&&o.w>0&&o.h>0);
+}
+function photoAttachment(photo,{x,y}){
+ return {targetId:photo.id,relativeX:Math.min(1,(x-photo.x)/photo.w),relativeY:Math.min(1,(y-photo.y)/photo.h)};
+}
 function nearestAnchor(model,point,excludeId,scale={x:1,y:1},radius=10){
  let closest=null,distance=radius;
  for(const o of model.objects){if(o.id===excludeId)continue;for(const [anchorIndex,anchor] of anchorPoints(o).entries()){const d=Math.hypot((anchor.x-point.x)*scale.x,(anchor.y-point.y)*scale.y);if(d<=distance){distance=d;closest={...anchor,targetId:o.id,anchorIndex};}}}
@@ -30,7 +54,13 @@ function nearestAnchor(model,point,excludeId,scale={x:1,y:1},radius=10){
 function attachEndpoint(model,o,key,anchor){
  o.attachments=o.attachments||{};delete o.attachments[key];
  if(anchor){const seen=new Set(),depends=id=>{if(id===o.id)return true;if(seen.has(id))return false;seen.add(id);const target=model.objects.find(v=>v.id===id);return Object.values(target?.attachments||{}).some(a=>a&&depends(a.targetId));};
-  if(!depends(anchor.targetId))o.attachments[key]={targetId:anchor.targetId,anchorIndex:anchor.anchorIndex};
+  if(!depends(anchor.targetId)){
+   const binding=Number.isFinite(anchor.relativeX)
+    ?{targetId:anchor.targetId,relativeX:anchor.relativeX,relativeY:anchor.relativeY}
+    :{targetId:anchor.targetId,anchorIndex:anchor.anchorIndex};
+   if(key==='start'&&o.calloutArrow)binding.auto=false;
+   o.attachments[key]=binding;
+  }
  }
  if(!Object.keys(o.attachments).length)delete o.attachments;
 }
@@ -39,10 +69,44 @@ function syncConnections(model){
  function visit(o){if(state.get(o.id)===2)return;state.set(o.id,1);
   if(!['arrow','line'].includes(o.type)){delete o.attachments;state.set(o.id,2);return;}
   const ends=lineEndpoints(o),bindings={};
-  for(const [key,n]of [['start','1'],['end','2']]){const a=o.attachments?.[key],target=objects.get(a?.targetId);if(!target||target===o||state.get(target.id)===1||!Number.isInteger(a.anchorIndex))continue;visit(target);const point=anchorPoints(target)[a.anchorIndex];if(!point)continue;bindings[key]={targetId:target.id,anchorIndex:a.anchorIndex};ends['x'+n]=point.x;ends['y'+n]=point.y;}
+  // Resolve the photo point before choosing the callout's facing edge.
+  for(const [key,n]of [['end','2'],['start','1']]){
+   const a=o.attachments?.[key],target=objects.get(a?.targetId);
+   if(!target||target===o||state.get(target.id)===1)continue;
+   visit(target);
+   let point;
+   if(key==='end'&&target.type==='photo'&&[a.relativeX,a.relativeY].every(v=>Number.isFinite(v)&&v>=0&&v<=1)){
+    point={x:target.x+target.w*a.relativeX,y:target.y+target.h*a.relativeY};
+    o.calloutArrow=true;
+    bindings[key]={targetId:target.id,relativeX:a.relativeX,relativeY:a.relativeY};
+   }else{
+    let {anchorIndex,auto}=a;
+    if(key==='start'&&target.type==='rect'&&target.callout&&auto!==false){
+     const oldMidpoint=Number.isInteger(anchorIndex)&&anchorIndex>=4&&anchorIndex<=7;
+     if(a.edge===true||(o.calloutArrow&&(auto===true||(auto===undefined&&oldMidpoint)))){
+      auto=true;o.calloutArrow=true;
+      anchorIndex=facingEdgeAnchor(target,{x:ends.x2,y:ends.y2},anchorIndex);
+     }
+    }
+    if(Number.isInteger(anchorIndex)){
+     point=anchorPoints(target)[anchorIndex];
+     if(point)bindings[key]={targetId:target.id,anchorIndex,...(typeof auto==='boolean'?{auto}:{})};
+    }
+   }
+   if(point){ends['x'+n]=point.x;ends['y'+n]=point.y;}
+  }
   if(Object.keys(bindings).length)o.attachments=bindings;else delete o.attachments;setLineEndpoints(o,ends);state.set(o.id,2);
  }
  for(const o of model.objects)visit(o);return model;
+}
+function mapPhotoAttachmentPoints(model,photoId,transform){
+ for(const o of model.objects){
+  const attachment=o.attachments?.end;
+  if(attachment?.targetId!==photoId||!Number.isFinite(attachment.relativeX))continue;
+  const [x,y]=transform(attachment.relativeX,attachment.relativeY);
+  if(x < -1e-8||x > 1+1e-8||y < -1e-8||y > 1+1e-8){delete o.attachments.end;continue;}
+  attachment.relativeX=Math.max(0,Math.min(1,x));attachment.relativeY=Math.max(0,Math.min(1,y));
+ }
 }
 function lineAngle(o){const p=lineEndpoints(o);return Math.atan2(p.y2-p.y1,p.x2-p.x1)*180/Math.PI;}
 function setLineAngle(o,angle,bounds,length=Math.hypot(o.w,o.h)){
@@ -60,6 +124,17 @@ function resizeCorner(o,start,corner,dx,dy,bounds){
  Object.assign(o,{x:left?ax-w:ax,y:top?ay-h:ay,w,h});return o;
 }
 function wrapText(text,width,fontSize){const max=Math.max(1,(width-8)/fontSize),out=[];for(const line of String(text||'').split('\n')){let row='',units=0;for(const c of Array.from(line)){const n=c.charCodeAt(0)>255?1:.58;if(row&&units+n>max){out.push(row);row='';units=0;}row+=c;units+=n;}out.push(row);}return out;}
+function rectTextWrapped(text,width,fontSize){
+ if(!root.document?.body)return wrapText(text,width,fontSize).join('\n');
+ // Hard wrapping serializes the same native line breaks used by the canvas text field.
+ const form=document.createElement('form'),input=document.createElement('textarea');
+ form.style.cssText='position:absolute;left:-10000px;top:0;visibility:hidden;width:'+width+'px';
+ form.className='object-inline-editor object-inline-centered';
+ input.name='text';input.wrap='hard';input.style.fontSize=fontSize+'px';input.value=text;
+ form.append(input);document.body.append(form);
+ try{return new FormData(form).get('text').replace(/\r\n/g,'\n');}
+ finally{form.remove();}
+}
 function edgePoints(m,e){const a=m.objects.find(o=>o.id===e.from),b=m.objects.find(o=>o.id===e.to);if(!a||!b)return null;const ac={x:a.x+a.w/2,y:a.y+a.h/2},bc={x:b.x+b.w/2,y:b.y+b.h/2},dx=bc.x-ac.x,dy=bc.y-ac.y;const t=(o,sign)=>{const xx=Math.abs(dx)/Math.max(.001,o.w/2),yy=Math.abs(dy)/Math.max(.001,o.h/2);return 1/Math.max(.001,o.type==='triangle'?Math.max(2*xx-sign*2*dy/o.h,sign*2*dy/o.h):o.type==='diamond'?xx+yy:o.type==='ellipse'?Math.hypot(xx,yy):Math.max(xx,yy));};return {x1:ac.x+dx*t(a,1),y1:ac.y+dy*t(a,1),x2:bc.x-dx*t(b,-1),y2:bc.y-dy*t(b,-1)};}
 const center=o=>({x:o.x+o.w/2,y:o.y+o.h/2});
 const sideWidth=o=>o.w*(o.type==='triangle'?.25:.5);
@@ -381,7 +456,7 @@ function generateFlow(rows,columns){
  return normalize(m);
 }
 
-function remove(m,key){syncConnections(m);m.objects=m.objects.filter(o=>o.id!==key);const removed=new Set(m.edges.filter(e=>e.id===key||e.from===key||e.to===key).map(e=>e.id));m.edges=m.edges.filter(e=>!removed.has(e.id)&&!removed.has(e.join));syncConnections(m);}
+function remove(m,key){syncConnections(m);const label=m.objects.find(o=>o.id===key);m.objects=m.objects.filter(o=>o.id!==key&&!(o.calloutArrow&&o.attachments?.start?.targetId===key&&label?.callout));const removed=new Set(m.edges.filter(e=>e.id===key||e.from===key||e.to===key).map(e=>e.id));m.edges=m.edges.filter(e=>!removed.has(e.id)&&!removed.has(e.join));syncConnections(m);}
 function duplicate(m,key){const o=m.objects.find(x=>x.id===key);if(!o)return null;const n={...clone(o),id:id(),x:Math.min(m.width-o.w,o.x+20),y:Math.min(m.height-o.h,o.y+20)};delete n.attachments;delete n.processId;delete n.prefix;m.objects.push(n);return n.id;}
 const PHOTO_MAX_EDGE=1800,PHOTO_REENCODE_BYTES=1.5*1024*1024,PHOTO_MAX_BYTES=35*1024*1024;
 function photoMime(data){return /^data:(image\/(?:png|jpeg|webp));base64,/i.exec(data)?.[1].toLowerCase();}
@@ -476,7 +551,7 @@ function restorePhotoCaptions(input,photos){
 function fromProcesses(pages){const m={width:1000,height:650,objects:[],edges:[]},seen=new Set();pages.filter(p=>{if(seen.has(p.processId))return false;seen.add(p.processId);return true;}).forEach((p,i)=>{m.objects.push({id:id(),type:'rect',text:p.name,x:60+Math.floor(i/6)*240,y:30+(i%6)*95,w:200,h:60,fill:'#ffffff'});if(i)m.edges.push({id:id(),from:m.objects[i-1].id,to:m.objects[i].id,label:''});});if(m.objects.length>24)throw Error('从工序生成最多支持24个节点；请拆分为多个流程或在画布手动添加。');return normalize(m);}
 // Occupied bounds detect elements outside the remaining page area without resizing them.
 function contentHeight(model){const m=normalize(model);return m.objects.reduce((bottom,o)=>{let edge=o.y+o.h;if(o.type==='photo'&&o.caption)edge+=4+17*wrapText(o.caption,o.w,14).length;if(!['photo','arrow','line'].includes(o.type)&&o.text){const lines=wrapText(o.text,o.w,o.fontSize);edge=Math.max(edge,o.y+o.h/2+(lines.length-1)*o.fontSize*.6+o.fontSize*.7);}return Math.max(bottom,edge+(['arrow','line'].includes(o.type)?Math.max(8,o.strokeWidth*3.5):8));},0);}
-function svg(model,selection='',editing=false,{viewHeight,picked=[],imageSource=o=>o.rendered||o.data,live=false,centerContent=false}={}){const m=normalize(model,live),height=Number.isFinite(viewHeight)?Math.max(1,viewHeight):m.height,marker='sop-object-arrow-'+(++renderId);let out=`<svg class="object-sheet" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${m.width} ${height}" role="img" aria-label="独立对象画布"><defs><marker id="${marker}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#243e46"/></marker></defs><rect width="${m.width}" height="${height}" fill="white"/>`;
+function svg(model,selection='',editing=false,{viewHeight,picked=[],imageSource=o=>o.rendered||o.data,live=false,centerContent=false,hideText='',nativeRectText=false}={}){const m=normalize(model,live),height=Number.isFinite(viewHeight)?Math.max(1,viewHeight):m.height,marker='sop-object-arrow-'+(++renderId);let out=`<svg class="object-sheet" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${m.width} ${height}" role="img" aria-label="独立对象画布"><defs><marker id="${marker}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#243e46"/></marker></defs><rect width="${m.width}" height="${height}" fill="white"/>`;
  const canvas=out;
  out='';
  const edgeLabels=[],edgeHandles=[],bounds=[];
@@ -500,16 +575,31 @@ function svg(model,selection='',editing=false,{viewHeight,picked=[],imageSource=
    edgeHandles.push(`<circle data-object="${esc(e.id)}" data-flow-handle="${e.join?'join':'bend'}" cx="${p.x}" cy="${p.y}" r="5" fill="white" stroke="#0d9692" stroke-width="2" style="cursor:move"/>`);
   }
  }
- for(const o of m.objects){const objectMarker=marker+'-'+String(o.id).replace(/[^a-z0-9]/gi,'');out+=`<defs><marker id="${objectMarker}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="${o.color}"/></marker></defs>`;out+=`<g data-object="${esc(o.id)}" transform="translate(${o.x} ${o.y})">`;const style=`fill="${o.fill}" stroke="${o.color}" stroke-width="${o.strokeWidth}"`;
+ const selectedLine=editing&&m.objects.find(o=>o.id===selection&&['arrow','line'].includes(o.type));
+ const orderedObjects=selectedLine?m.objects.filter(o=>o!==selectedLine).concat(selectedLine):m.objects;
+ for(const o of orderedObjects){
+  const arrowAtStart=o.type==='arrow'&&o.calloutArrow;
+  const objectMarker=marker+'-'+String(o.id).replace(/[^a-z0-9]/gi,'');
+  out+=`<defs><marker id="${objectMarker}" viewBox="0 0 10 10" refX="${arrowAtStart?10:9}" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="${o.color}"/></marker></defs>`;out+=`<g data-object="${esc(o.id)}" transform="translate(${o.x} ${o.y})">`;const style=`fill="${o.fill}" stroke="${o.color}" stroke-width="${o.strokeWidth}"`;
   if(o.type==='photo'){
    out+=`<image href="${esc(imageSource(o))}" width="${o.w}" height="${o.h}" preserveAspectRatio="xMidYMid meet"/>`;
    if(o.caption)out+=`<text x="${o.w/2}" y="${o.h+4}" dominant-baseline="hanging" text-anchor="middle" font-size="14" fill="#111" pointer-events="${editing?'visiblePainted':'none'}">${wrapText(o.caption,o.w,14).map((text,i)=>`<tspan x="${o.w/2}" dy="${i?17:0}">${esc(text)}</tspan>`).join('')}</text>`;
   }
-  else if(['arrow','line'].includes(o.type))out+=`<line x1="${o.flipX?o.w:0}" y1="${o.flipY?o.h:0}" x2="${o.flipX?0:o.w}" y2="${o.flipY?0:o.h}" stroke="${o.color}" stroke-width="${o.strokeWidth}" ${o.type==='arrow'?`marker-end="url(#${objectMarker})"`:''}/>`;
+  else if(['arrow','line'].includes(o.type))out+=`<line x1="${o.flipX?o.w:0}" y1="${o.flipY?o.h:0}" x2="${o.flipX?0:o.w}" y2="${o.flipY?0:o.h}" stroke="${o.color}" stroke-width="${o.strokeWidth}" ${o.type==='arrow'?`marker-${arrowAtStart?'start':'end'}="url(#${objectMarker})"`:''}/>`;
   else {if(o.type==='ellipse')out+=`<ellipse cx="${o.w/2}" cy="${o.h/2}" rx="${o.w/2}" ry="${o.h/2}" ${style}/>`;else if(o.type==='triangle')out+=`<polygon points="${o.w/2},0 ${o.w},${o.h} 0,${o.h}" ${style}/>`;else if(o.type==='diamond')out+=`<polygon points="${o.w/2},0 ${o.w},${o.h/2} ${o.w/2},${o.h} 0,${o.h/2}" ${style}/>`;else out+=`<rect width="${o.w}" height="${o.h}" ${o.type==='text'?`fill="${o.fill}" stroke="none"`:style}/>`;
-   const lines=wrapText(o.text,flowTextWidth(o),o.fontSize),fs=o.fontSize;out+=`<text text-anchor="${o.type==='text'?'start':'middle'}" x="${o.type==='text'?4:o.w/2}" y="${o.h*(o.type==='triangle'?.72:.5)-(lines.length-1)*fs*.6}" dominant-baseline="middle" font-size="${fs}" font-family="Microsoft YaHei, sans-serif" fill="${o.color}">${lines.map((s,i)=>`<tspan x="${o.type==='text'?4:o.w/2}" dy="${i?fs*1.2:0}">${esc(s)}</tspan>`).join('')}</text>`;}
+   if(o.id!==hideText&&o.type==='rect'&&nativeRectText){
+    out+=`<foreignObject width="${o.w}" height="${o.h}" overflow="visible" pointer-events="none"><div xmlns="http://www.w3.org/1999/xhtml" class="object-inline-editor object-inline-centered"><textarea readonly tabindex="-1" rows="1" aria-hidden="true" data-object-text style="font-size:${o.fontSize}px;color:${o.color};text-align:center">\n${esc(o.text)}</textarea></div></foreignObject>`;
+   }else if(o.id!==hideText){
+    const lines=wrapText(o.text,flowTextWidth(o),o.fontSize),fs=o.fontSize;
+    out+=`<text text-anchor="${o.type==='text'?'start':'middle'}" x="${o.type==='text'?4:o.w/2}" y="${o.h*(o.type==='triangle'?.72:.5)-(lines.length-1)*fs*.6}" dominant-baseline="middle" font-size="${fs}" font-family="Microsoft YaHei, sans-serif" fill="${o.color}">${lines.map((s,i)=>`<tspan x="${o.type==='text'?4:o.w/2}" dy="${i?fs*1.2:0}">${esc(s)}</tspan>`).join('')}</text>`;
+   }
+  }
   if(editing){if(['arrow','line'].includes(o.type))out+=`<line x1="${o.flipX?o.w:0}" y1="${o.flipY?o.h:0}" x2="${o.flipX?0:o.w}" y2="${o.flipY?0:o.h}" stroke="transparent" stroke-width="${Math.max(8,o.strokeWidth)}" pointer-events="stroke"/>`;out+=`<rect width="${o.w}" height="${o.h}" fill="transparent" stroke="${o.id===selection||picked.includes(o.id)?'#0d9692':'transparent'}" stroke-dasharray="5 3" ${['arrow','line'].includes(o.type)?'pointer-events="none"':''}/>`;}
-  if(editing&&o.id===selection&&['arrow','line'].includes(o.type)){const p=lineEndpoints(o);out+=`<circle data-endpoint="start" cx="${p.x1-o.x}" cy="${p.y1-o.y}" r="4" fill="white" stroke="#0d9692" stroke-width="1.5"/><circle data-endpoint="end" cx="${p.x2-o.x}" cy="${p.y2-o.y}" r="4" fill="#0d9692" stroke="white" stroke-width="1.2"/>`;}else if(editing&&o.id===selection)for(const [corner,x,y]of [["nw",0,0],["ne",o.w,0],["sw",0,o.h],["se",o.w,o.h]])out+=`<rect data-resize="${corner}" x="${x-3.5}" y="${y-3.5}" width="7" height="7" fill="#0d9692" stroke="white" stroke-width="1.2"/>`;out+='</g>';
+  if(editing&&o.id===selection&&['arrow','line'].includes(o.type)){
+   const p=lineEndpoints(o);
+   const tipStyle='fill="#0d9692" stroke="white" stroke-width="1.2"',otherStyle='fill="white" stroke="#0d9692" stroke-width="1.5"';
+   out+=`<circle data-endpoint="start" cx="${p.x1-o.x}" cy="${p.y1-o.y}" r="4" ${arrowAtStart?tipStyle:otherStyle}/><circle data-endpoint="end" cx="${p.x2-o.x}" cy="${p.y2-o.y}" r="4" ${arrowAtStart?otherStyle:tipStyle}/>`;
+  }else if(editing&&o.id===selection)for(const [corner,x,y]of [["nw",0,0],["ne",o.w,0],["sw",0,o.h],["se",o.w,o.h]])out+=`<rect data-resize="${corner}" x="${x-3.5}" y="${y-3.5}" width="7" height="7" fill="#0d9692" stroke="white" stroke-width="1.2"/>`;out+='</g>';
  }
  const content=out+edgeLabels.join('')+edgeHandles.join('');
  if(!bounds.length)return canvas+content+'</svg>';
@@ -518,12 +608,23 @@ function svg(model,selection='',editing=false,{viewHeight,picked=[],imageSource=
  const dy=(height-Math.min(...ys)-Math.max(...ys))/2;
  return canvas+'<g transform="translate('+dx+' '+dy+')">'+content+'</g></svg>';
 }
-function open(input,{title='图文画布',flow=false,photos=[],availableHeight,preview=false,onSave}={}){
- const d=document.createElement('dialog');d.className='object-dialog';let m=normalize(input),selected='',history=[],drag=null,snap=null,linkFrom='',inlineEdit=null,lastTap=null,tool='',creating=null;
+function open(input,{title='图文画布',flow=false,photos=[],availableHeight,preview=false,startCallout=false,onSave}={}){
+ const d=document.createElement('dialog');d.className='object-dialog';let m=normalize(input),selected='',history=[],drag=null,snap=null,linkFrom='',inlineEdit=null,lastTap=null,tool='',creating=null,calloutPoint=null,propertyTextPreview=null;
  let picked=[],marquee=null,boxMode=false,guides=null;
  const drawingHeight=Number.isFinite(availableHeight)?Math.max(1,availableHeight):null;if(drawingHeight)m.height=Math.max(m.height,drawingHeight);const bounds=()=>({width:m.width,height:drawingHeight??m.height});
- d.innerHTML=`<div class="dialog-head"><div><h2>${esc(title)}</h2><small>选择形状后在画布按下并拖动绘制，松开完成，Esc 取消。拖动对象移动，四角均可缩放；箭头端点吸附后跟随目标移动、缩放；拖离可解除连接。双击形状可直接编辑文字。${flow?' 拖空白处框选。靠近对齐位置会吸附，按 Alt 自由移动。':' 复制图片后，可按 Ctrl+V 粘贴到画布。'}</small></div><button data-action="close">取消</button></div><div class="object-tools"><button data-add="rect">＋ 矩形</button><button data-add="ellipse">＋ 椭圆</button><button data-add="diamond">＋ 菱形</button><button data-add="arrow">＋ 箭头</button>${flow?'<button data-add="triangle">＋ 三角形</button><button data-action="box" aria-pressed="false">框选</button><button data-action="connect">连接节点 / 汇入主线</button>':'<button data-action="upload">＋ 照片</button><input type="file" accept="image/png,image/jpeg,image/webp" hidden id="objectPhoto">'}<button data-action="editText">编辑文字</button><button data-action="copy">复制对象</button><button data-action="delete">删除对象</button><button data-action="undo">撤销</button><span class="object-message"></span></div><div class="object-layout"><div class="object-stage"></div><aside class="object-properties"></aside></div><div class="dialog-foot"><span>保存后写入项目；取消放弃本次画布修改。</span><button data-action="save" class="primary">${preview?'应用流程图':'保存画布'}</button></div>`;document.body.append(d);
- const q=s=>d.querySelector(s),push=()=>{history.push(clone(m));if(history.length>60)history.shift();},message=t=>q('.object-message').textContent=t;
+ const calloutHeight=(text,width,fontSize)=>Math.ceil(rectTextWrapped(text,width,fontSize).split('\n').length*fontSize*1.2+16);
+ function fitCalloutText(o){
+  if(o.callout&&o.type==='rect'){
+   const height=calloutHeight(o.text,o.w,o.fontSize);
+   if(height>o.h){
+    o.h=Math.min(4000,height);
+    o.y=Math.max(0,Math.min(o.y,bounds().height-o.h-8));
+   }
+  }
+  return o;
+ }
+ d.innerHTML=`<div class="dialog-head"><div><h2>${esc(title)}</h2><small>选择形状后在画布按下并拖动绘制，松开完成，Esc 取消。拖动对象移动，四角均可缩放；箭头端点吸附后跟随目标移动、缩放；拖离可解除连接。双击形状可直接编辑文字。${flow?' 拖空白处框选。靠近对齐位置会吸附，按 Alt 自由移动。':' 复制图片后，可按 Ctrl+V 粘贴到画布。'}</small></div><button data-action="close">取消</button></div><div class="object-tools"><button data-add="rect">＋ 矩形</button><button data-add="ellipse">＋ 椭圆</button><button data-add="diamond">＋ 菱形</button><button data-add="arrow">＋ 箭头</button>${flow?'<button data-add="triangle">＋ 三角形</button><button data-action="box" aria-pressed="false">框选</button><button data-action="connect">连接节点 / 汇入主线</button>':'<button data-add="callout">点照片加标注</button><button data-action="upload">＋ 照片</button><input type="file" accept="image/png,image/jpeg,image/webp" hidden id="objectPhoto">'}<button data-action="editText">编辑文字</button><button data-action="copy">复制对象</button><button data-action="delete">删除对象</button><button data-action="undo">撤销</button><span class="object-message" aria-live="polite"></span></div><div class="object-layout"><div class="object-stage"></div><aside class="object-properties"></aside></div><div class="dialog-foot"><span>保存后写入项目；取消放弃本次画布修改。</span><button data-action="save" class="primary">${preview?'应用流程图':'保存画布'}</button></div>`;document.body.append(d);
+ const q=s=>d.querySelector(s),push=(model=m)=>{history.push(clone(model));if(history.length>60)history.shift();},message=t=>q('.object-message').textContent=t;
  const imageUrls=new Map();
  function imageSource(o){
   const source=o.rendered||o.data;
@@ -553,7 +654,28 @@ function open(input,{title='图文画布',flow=false,photos=[],availableHeight,p
   imageUrls.clear();
   d.remove();
  }
- function drawStage(live=false){cancelStageFrame();syncConnections(m);q('.object-stage').style.cursor=tool||boxMode?'crosshair':'';q('[data-action=box]')?.setAttribute('aria-pressed',String(boxMode));d.querySelectorAll('[data-add]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.add===tool)));q('.object-stage').innerHTML=svg(m,selected,true,{picked,imageSource,live});
+ function drawStage(live=false){
+  cancelStageFrame();syncConnections(m);
+  const stage=q('.object-stage');
+  stage.style.cursor=tool||boxMode?'crosshair':'';
+  stage.classList.toggle('object-callout-mode',tool==='callout');
+  q('[data-action=box]')?.setAttribute('aria-pressed',String(boxMode));
+  d.querySelectorAll('[data-add]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.add===tool)));
+  const edited=inlineEdit?.preview||propertyTextPreview;
+  const model=edited?{...m,height:Math.max(m.height,edited.h),objects:m.objects.map(o=>o.id===edited.id?edited:o)}:m;
+  const markup=svg(model,selected,true,{picked,imageSource,live,hideText:inlineEdit?.object.id,nativeRectText:!flow});
+  const editor=inlineEdit?.host,sheet=q('svg');
+  if(sheet&&editor?.parentNode===sheet){
+   // Keep the focused input in the DOM across height changes and IME composition.
+   const template=document.createElement('template');
+   template.innerHTML=markup;
+   const replacement=template.content.firstElementChild;
+   sheet.setAttribute('viewBox',replacement.getAttribute('viewBox'));
+   for(const child of [...sheet.children])if(child!==editor)child.remove();
+   const content=document.createDocumentFragment();
+   content.append(...replacement.children);
+   sheet.insertBefore(content,editor);
+  }else stage.innerHTML=markup;
   if(marquee||guides){
    const box=marquee?.box;
    const selection=box?`<rect data-marquee x="${box.x}" y="${box.y}" width="${box.w}" height="${box.h}" fill="#0d9692" fill-opacity=".1" stroke="#0d9692" vector-effect="non-scaling-stroke"/>`:'';
@@ -564,8 +686,12 @@ function open(input,{title='图文画布',flow=false,photos=[],availableHeight,p
   if(drawingHeight){const sheet=q('svg'),background=[...sheet.children].find(n=>n.tagName==='rect');sheet.style.minHeight='0';background.setAttribute('fill','#dfe7ea');background.insertAdjacentHTML('afterend',`<rect data-drawing-area width="${m.width}" height="${drawingHeight}" fill="white" stroke="#9cbfc0" stroke-dasharray="5 3" pointer-events="none"/>`);}if(snap){const sheet=q('svg'),target=m.objects.find(o=>o.id===snap.targetId),unit=m.width/sheet.getBoundingClientRect().width;sheet.insertAdjacentHTML('beforeend',`<g class="snap-guide" data-snap-kind="${snap.kind}" pointer-events="none" aria-hidden="true">${anchorPoints(target).map(a=>`<circle cx="${a.x}" cy="${a.y}" r="${2.5*unit}" fill="white" stroke="#0d9692" stroke-width="${unit}"/>`).join('')}<circle data-snap-active cx="${snap.x}" cy="${snap.y}" r="${6*unit}" fill="#e1f7f4" stroke="#0d9692" stroke-width="${2*unit}"/></g>`);}}
  function draw(){drawStage();const o=m.objects.find(o=>o.id===selected),e=m.edges.find(e=>e.id===selected);q('[data-action="undo"]').disabled=!history.length;q('[data-action="copy"]').disabled=!(o||picked.some(key=>m.objects.some(node=>node.id===key)));
   q('[data-action="delete"]').disabled=!(selected||picked.length);
-  q('.object-properties').innerHTML=picked.length?`<strong>已选中 ${picked.length} 个元素</strong><p>拖动选中的节点可一起移动，也可复制、删除或撤销。</p>`:o?`<strong>对象属性</strong><label>文字<textarea data-prop="text">${esc(o.text)}</textarea></label>${o.processId?'<small>文字关联 SOP 工序。修改文字后转为自定义。</small>':''}<label>形状<select data-prop="type">${(o.type==='photo'?['photo']:(o.type==='text'?['text','rect','ellipse','diamond','triangle','arrow','line']:['rect','ellipse','diamond','triangle','arrow','line'])).map(t=>`<option value="${t}" ${t===o.type?'selected':''}>${({photo:'照片',text:'文字框',rect:'矩形',ellipse:'椭圆',diamond:'菱形',triangle:'三角形',arrow:'箭头',line:'直线'})[t]}</option>`).join('')}</select></label>${(['arrow','line','photo'].includes(o.type)?[]:['fontSize']).map(k=>`<label>字号<input data-prop="${k}" type="number" value="${o[k]}"></label>`).join('')}${['arrow','line'].includes(o.type)?`<div class="line-endpoints"><label>角度（°）<input data-line-angle type="number" step="0.1" value="${Number(lineAngle(o).toFixed(1))}"></label><label>长度<input data-line-length type="number" min="1" step="0.1" value="${Number(Math.hypot(o.w,o.h).toFixed(1))}"></label><small>拖动两端圆点调整方向；靠近角点或中点约 10px 时连接并跟随；拖离解除，按住 Alt 自由定位。</small></div>`:''}${o.type!=='photo'?`<label>线条粗细<input data-prop="strokeWidth" type="number" min="0.5" max="20" step="0.5" value="${o.strokeWidth}"></label>`:''}${o.type==='photo'?'<label>旋转角度（°）<input data-photo-angle type="number" min="-180" max="180" step="0.1" value="0"></label><input data-photo-slider type="range" aria-label="旋转角度" min="-180" max="180" value="0"><button type="button" data-rotate-photo>应用旋转</button><small>正数向右旋转。距直角 4° 以内自动吸附。</small>':''}<div data-object-color></div><div data-object-fill></div>${['arrow','line'].includes(o.type)?'<button data-flip="flipX">左右翻转箭头</button><button data-flip="flipY">上下翻转箭头</button>':''}`:e?`<strong>连接线</strong><label>分支标签<input data-edge-label value="${esc(e.label)}"></label><label>线条粗细<input data-edge-width type="number" min="0.5" max="20" step="0.5" value="${e.strokeWidth}"></label>${e.join?'<small>拖动线末端圆点可沿主线移动汇入位置。</small>':`<label>走线<select data-edge-route><option value="" ${!e.route?'selected':''}>直线</option><option value="down" ${e.route==='down'?'selected':''}>直角折线（上下接入）</option><option value="across" ${e.route==='across'?'selected':''}>直角折线（左右接入）</option></select></label><small>拖动连线上的圆点调整走线。</small>`}<div data-edge-color></div><small>可拖动标签。移动关联节点时连线自动跟随。</small>`:'<strong>页面对象</strong><p>点击文字、照片、形状或连线进行编辑。</p>';
-  if(o){SOP_COLORS.mount(q('[data-object-color]'),{label:'文字 / 线条',value:o.color,onChange:color=>{push();o.color=color;remember(o);draw();}});SOP_COLORS.mount(q('[data-object-fill]'),{label:'填充',value:o.fill,transparent:true,onChange:color=>{push();o.fill=color;remember(o);draw();}});}if(e)SOP_COLORS.mount(q('[data-edge-color]'),{label:'连线颜色',value:e.color,onChange:color=>{push();e.color=color;remember({...e,type:'edge'});draw();}});if(q('[data-line-angle]'))q('[data-line-angle]').onchange=ev=>{push();delete o.attachments;setLineAngle(o,ev.target.value,bounds());draw();};if(q('[data-line-length]'))q('[data-line-length]').onchange=ev=>{push();delete o.attachments;setLineAngle(o,lineAngle(o),bounds(),ev.target.value);draw();};
+  q('[data-add="callout"]')?.toggleAttribute('disabled',!m.objects.some(item=>item.type==='photo'));
+  if(calloutPoint){drawCalloutControls();return;}
+  q('.object-properties').innerHTML=picked.length?`<strong>已选中 ${picked.length} 个元素</strong><p>拖动选中的节点可一起移动，也可复制、删除或撤销。</p>`:o?`<strong>对象属性</strong><label>文字<textarea data-prop="text">${esc(o.text)}</textarea></label>${o.processId?'<small>文字关联 SOP 工序。修改文字后转为自定义。</small>':''}<label>形状<select data-prop="type">${(o.type==='photo'?[o.type]:(o.type==='text'?['text','rect','ellipse','diamond','triangle','arrow','line']:['rect','ellipse','diamond','triangle','arrow','line'])).map(t=>`<option value="${t}" ${t===o.type?'selected':''}>${({photo:'照片',text:'文字框',rect:'矩形',ellipse:'椭圆',diamond:'菱形',triangle:'三角形',arrow:'箭头',line:'直线'})[t]}</option>`).join('')}</select></label>${(['arrow','line','photo'].includes(o.type)?[]:['fontSize']).map(k=>`<label>字号<input data-prop="${k}" type="number" value="${o[k]}"></label>`).join('')}${['arrow','line'].includes(o.type)?`<div class="line-endpoints"><label>角度（°）<input data-line-angle type="number" step="0.1" value="${Number(lineAngle(o).toFixed(1))}"></label><label>长度<input data-line-length type="number" min="1" step="0.1" value="${Number(Math.hypot(o.w,o.h).toFixed(1))}"></label><small>拖动两端圆点调整方向；靠近角点或中点约 10px 时连接并跟随；拖离解除，按住 Alt 自由定位。</small></div>`:''}${o.type!=='photo'?`<label>线条粗细<input data-prop="strokeWidth" type="number" min="0.5" max="20" step="0.5" value="${o.strokeWidth}"></label>`:''}${o.type==='photo'?'<label>旋转角度（°）<input data-photo-angle type="number" min="-180" max="180" step="0.1" value="0"></label><input data-photo-slider type="range" aria-label="旋转角度" min="-180" max="180" value="0"><button type="button" data-rotate-photo>应用旋转</button><small>正数向右旋转。距直角 4° 以内自动吸附。</small>':''}<div data-object-color></div><div data-object-fill></div>${['arrow','line'].includes(o.type)?'<button data-flip="flipX">左右翻转箭头</button><button data-flip="flipY">上下翻转箭头</button>':''}`:e?`<strong>连接线</strong><label>分支标签<input data-edge-label value="${esc(e.label)}"></label><label>线条粗细<input data-edge-width type="number" min="0.5" max="20" step="0.5" value="${e.strokeWidth}"></label>${e.join?'<small>拖动线末端圆点可沿主线移动汇入位置。</small>':`<label>走线<select data-edge-route><option value="" ${!e.route?'selected':''}>直线</option><option value="down" ${e.route==='down'?'selected':''}>直角折线（上下接入）</option><option value="across" ${e.route==='across'?'selected':''}>直角折线（左右接入）</option></select></label><small>拖动连线上的圆点调整走线。</small>`}<div data-edge-color></div><small>可拖动标签。移动关联节点时连线自动跟随。</small>`:'<strong>页面对象</strong><p>点击文字、照片、形状或连线进行编辑。</p>';
+  if(o){SOP_COLORS.mount(q('[data-object-color]'),{label:'文字 / 线条',value:o.color,onChange:color=>{push();o.color=color;
+   if(o.callout)for(const arrow of m.objects)if(arrow.calloutArrow&&arrow.attachments?.start?.targetId===o.id)arrow.color=color;
+   remember(o);draw();}});SOP_COLORS.mount(q('[data-object-fill]'),{label:'填充',value:o.fill,transparent:true,onChange:color=>{push();o.fill=color;remember(o);draw();}});}if(e)SOP_COLORS.mount(q('[data-edge-color]'),{label:'连线颜色',value:e.color,onChange:color=>{push();e.color=color;remember({...e,type:'edge'});draw();}});if(q('[data-line-angle]'))q('[data-line-angle]').onchange=ev=>{push();delete o.attachments;setLineAngle(o,ev.target.value,bounds());draw();};if(q('[data-line-length]'))q('[data-line-length]').onchange=ev=>{push();delete o.attachments;setLineAngle(o,lineAngle(o),bounds(),ev.target.value);draw();};
   const angleInput=q('[data-photo-angle]'), slider=q('[data-photo-slider]'), rotateButton=q('[data-rotate-photo]');
   if(slider)slider.oninput=()=>{angleInput.value=slider.value;};
   if(angleInput)angleInput.oninput=()=>{slider.value=angleInput.value;};
@@ -606,34 +732,152 @@ function open(input,{title='图文画布',flow=false,photos=[],availableHeight,p
      [mark.x,mark.y]=rotatePoint(mark.x,mark.y);
      [mark.x2,mark.y2]=end;
     }
+    mapPhotoAttachmentPoints(m,o.id,rotatePoint);
     [o.w,o.h]=[w,h];
     o.aspectRatio=o.w/o.h;
     draw();
    } catch {if(button.isConnected)button.textContent='旋转失败，请重试';}
   };
-  q('.object-properties').querySelectorAll('[data-prop]').forEach(el=>el.onchange=()=>{push();if(el.dataset.prop==='text'){delete o.processId;delete o.prefix;}o[el.dataset.prop]=['fontSize','strokeWidth'].includes(el.dataset.prop)?Number(el.value):el.value;m=normalize(m);remember(m.objects.find(v=>v.id===selected));draw();});if(q('[data-edge-width]'))q('[data-edge-width]').onchange=ev=>{push();e.strokeWidth=Math.max(.5,Math.min(20,finite(ev.target.value,2)));remember({...e,type:'edge'});draw();};if(q('[data-edge-route]'))q('[data-edge-route]').onchange=ev=>{push();e.route=ev.target.value;delete e.bend;draw();};if(q('[data-edge-label]'))q('[data-edge-label]').onchange=ev=>{push();e.label=ev.target.value;draw();};q('.object-properties').querySelectorAll('[data-flip]').forEach(b=>b.onclick=()=>{push();delete o.attachments;o[b.dataset.flip]=!o[b.dataset.flip];draw();});if(q('[data-transparent]'))q('[data-transparent]').onclick=()=>{push();o.fill='transparent';remember(o);draw();};
+  q('.object-properties').querySelectorAll('[data-prop]').forEach(el=>{
+   const key=el.dataset.prop;
+   if(key==='text'){
+    el.oninput=()=>{
+     const previous=propertyTextPreview||o;
+     propertyTextPreview=fitCalloutText({...o,text:el.value,processId:undefined,prefix:undefined});
+     const display=q('.object-stage [data-object="'+CSS.escape(o.id)+'"] [data-object-text]');
+     if(display&&previous.h===propertyTextPreview.h&&previous.y===propertyTextPreview.y)display.value=el.value;
+     else drawStage();
+    };
+    el.onchange=()=>{
+     propertyTextPreview=null;
+     if(el.value!==o.text){
+      push();delete o.processId;delete o.prefix;o.text=el.value;fitCalloutText(o);m.height=Math.max(m.height,o.h);
+     }
+     drawStage();q('[data-action="undo"]').disabled=!history.length;
+    };
+    return;
+   }
+   el.onchange=()=>{
+    push();o[key]=['fontSize','strokeWidth'].includes(key)?Number(el.value):el.value;
+    m=normalize(m);const edited=m.objects.find(v=>v.id===selected);
+    if(key==='fontSize'){fitCalloutText(edited);m.height=Math.max(m.height,edited.h);}
+    remember(edited);draw();
+   };
+  });if(q('[data-edge-width]'))q('[data-edge-width]').onchange=ev=>{push();e.strokeWidth=Math.max(.5,Math.min(20,finite(ev.target.value,2)));remember({...e,type:'edge'});draw();};if(q('[data-edge-route]'))q('[data-edge-route]').onchange=ev=>{push();e.route=ev.target.value;delete e.bend;draw();};if(q('[data-edge-label]'))q('[data-edge-label]').onchange=ev=>{push();e.label=ev.target.value;draw();};q('.object-properties').querySelectorAll('[data-flip]').forEach(b=>b.onclick=()=>{push();delete o.attachments;o[b.dataset.flip]=!o[b.dataset.flip];draw();});if(q('[data-transparent]'))q('[data-transparent]').onclick=()=>{push();o.fill='transparent';remember(o);draw();};
  }
  function finishInline(commit=true){
-  if(!inlineEdit)return;const edit=inlineEdit;inlineEdit=null;
-  if(commit&&edit.input.value!==edit.object.text){push();delete edit.object.processId;delete edit.object.prefix;edit.object.text=edit.input.value;}
-  edit.host.remove();draw();
+  if(!inlineEdit)return;
+  const edit=inlineEdit,text=edit.input.value;
+  if(calloutPoint&&commit){
+   if(!text.trim()){message('请输入标注文字。');edit.input.focus();return;}
+   if(calloutHeight(text,edit.object.w,edit.object.fontSize)>bounds().height-8){
+    message('标注文字超出画布可用高度，请缩短文字。');edit.input.focus();return;
+   }
+  }
+  inlineEdit=null;
+  if(calloutPoint){
+   if(commit){
+    push(calloutPoint.previous);Object.assign(edit.object,edit.preview);remember(edit.object);
+   }else{m=calloutPoint.previous;selected='';}
+   calloutPoint=null;tool='';
+   message(commit?'已添加标注。拖动文字框可调整位置。':'已取消照片标注。');
+  }else if(commit&&text!==edit.object.text){
+   push();Object.assign(edit.object,edit.preview);delete edit.object.processId;delete edit.object.prefix;
+   m.height=Math.max(m.height,edit.object.h);
+  }
+  edit.host.remove();draw();q('.object-stage').focus({preventScroll:true});
+ }
+ function mountInline(o){
+  const centered=o.type==='rect';
+  const host=document.createElementNS('http://www.w3.org/2000/svg','foreignObject');
+  const container=document.createElement('div'),input=document.createElement('textarea');
+  if(centered)host.setAttribute('overflow','visible');
+  input.rows=1;input.value=o.text;input.dataset.inlineText='';
+  input.setAttribute('aria-label',calloutPoint?'标注文字':'画布内编辑文字');
+  if(calloutPoint){input.dataset.calloutText='';input.placeholder='输入标注文字';}
+  container.className='object-inline-editor'+(centered?' object-inline-centered':'');
+  input.style.fontSize=o.fontSize+'px';input.style.color=o.color;
+  input.style.textAlign=o.type==='text'?'left':'center';
+  container.append(input);host.append(container);q('svg').append(host);
+  inlineEdit={object:o,input,host,preview:o};
+  function resizeEditor(){
+   const preview=fitCalloutText({...o,text:input.value}),previous=inlineEdit.preview;
+   inlineEdit.preview=preview;
+   for(const [key,value]of Object.entries({x:preview.x,y:preview.y,width:preview.w,height:preview.h}))host.setAttribute(key,value);
+   if(previous.h!==preview.h||previous.y!==preview.y)drawStage();
+  }
+  resizeEditor();drawStage();
+  input.oninput=resizeEditor;
+  input.onpointerdown=event=>event.stopPropagation();input.ondblclick=event=>event.stopPropagation();
+  input.onkeydown=event=>{
+   event.stopPropagation();
+   if(event.isComposing||event.keyCode===229)return;
+   if(event.key==='Escape'){event.preventDefault();finishInline(false);}
+   else if(event.key==='Enter'&&(calloutPoint?!event.shiftKey:event.ctrlKey||event.metaKey)){
+    event.preventDefault();finishInline();
+   }
+  };
+  if(!calloutPoint)input.onblur=()=>finishInline();
+  input.focus();input.select();
+  message(calloutPoint?'Enter 添加，Shift+Enter 换行，Esc 取消。':'直接输入文字；Enter 换行，Ctrl+Enter 完成，Esc 取消。');
  }
  function beginInline(key=selected){
   if(inlineEdit)return;
   const o=m.objects.find(o=>o.id===key);if(!o||!['text','rect','ellipse','diamond','triangle'].includes(o.type)){message('请先选择矩形、椭圆、菱形或文字框。');return;}
-  drag=null;linkFrom='';selected=o.id;draw();
-  const host=document.createElementNS('http://www.w3.org/2000/svg','foreignObject');
-  for(const [k,v]of Object.entries({x:o.x,y:o.y,width:o.w,height:o.h}))host.setAttribute(k,v);
-  const input=document.createElement('textarea');input.value=o.text;input.setAttribute('aria-label','画布内编辑文字');
-  input.style.cssText='box-sizing:border-box;width:100%;height:100%;min-height:0;margin:0;padding:4px;resize:none;border:2px solid #0d9692;border-radius:0;background:white;line-height:1.2;font-family:Microsoft YaHei,sans-serif;font-size:'+o.fontSize+'px;color:'+o.color+';text-align:'+(o.type==='text'?'left':'center');
-  host.append(input);q('svg').append(host);inlineEdit={object:o,input,host};
-  input.onpointerdown=event=>event.stopPropagation();input.ondblclick=event=>event.stopPropagation();
-  input.onkeydown=event=>{event.stopPropagation();if(event.isComposing||event.keyCode===229)return;if(event.key==='Escape'){event.preventDefault();finishInline(false);}else if(event.key==='Enter'&&(event.ctrlKey||event.metaKey)){event.preventDefault();finishInline();}};
-  input.onblur=()=>finishInline();input.focus();input.select();message('直接输入文字；Enter 换行，Ctrl+Enter 完成，Esc 取消。');
- };
+  drag=null;linkFrom='';selected=o.id;draw();mountInline(o);
+ }
+ function drawCalloutControls(){
+  q('.object-properties').innerHTML='<div class="object-callout-form"><strong>照片标注</strong><div class="row"><button class="primary" data-callout-apply type="button">添加标注</button><button data-callout-cancel type="button">取消</button></div></div>';
+  q('[data-callout-apply]').onclick=()=>finishInline();
+  q('[data-callout-cancel]').onclick=cancelCallout;
+ }
+ function beginCalloutAt({x,y},photo){
+   const area=bounds(),label=newShape('rect',{callout:true});
+   const fontSize=Math.max(8,Math.min(80,finite(label.fontSize,20)));
+   const w=Math.min(area.width,Math.max(150,Math.min(250,fontSize*8+8)));
+   const h=calloutHeight('',w,fontSize),bottom=area.height-8;
+   if(h>bottom){message('画布可用高度不足，请先调整正文或字号。');return;}
+   const gap=24,nearX=Math.max(0,Math.min(area.width-w,x-w/2)),nearY=Math.max(0,Math.min(bottom-h,y-h/2));
+   const spots=[];
+   for(const offset of [0,-1,1,-2,2]){
+    const sideX=Math.max(0,Math.min(area.width-w,nearX+offset*(w+8)));
+    const sideY=Math.max(0,Math.min(bottom-h,nearY+offset*(h+8)));
+    spots.push({x:photo.x+photo.w+gap,y:sideY},{x:photo.x-w-gap,y:sideY},
+     {x:sideX,y:photo.y+photo.h+gap},{x:sideX,y:photo.y-h-gap});
+   }
+   spots.push({x:x+gap,y:nearY},{x:x-w-gap,y:nearY},{x:nearX,y:y+gap},{x:nearX,y:y-h-gap});
+   const fits=p=>p.x>=0&&p.x+w<=area.width&&p.y>=0&&p.y+h<=bottom;
+   const blockers=m.objects.filter(o=>o.type==='photo'||o.callout);
+   const clear=p=>blockers.every(o=>p.x+w<=o.x||p.x>=o.x+o.w||p.y+h<=o.y||p.y>=o.y+o.h);
+   const location=spots.find(p=>fits(p)&&clear(p))||spots.find(fits)||{x:nearX,y:nearY};
+   Object.assign(label,{...location,w,h,fontSize});
+   const anchorIndex=facingEdgeAnchor(label,{x,y}),start=anchorPoints(label)[anchorIndex];
+   const arrow=newShape('arrow',{calloutArrow:true,color:remembered.arrow?.color??label.color,attachments:{
+    start:{targetId:label.id,anchorIndex,auto:true},
+    end:photoAttachment(photo,{x,y})
+   }});
+   setLineEndpoints(arrow,{x1:start.x,y1:start.y,x2:x,y2:y});
+   calloutPoint={previous:m};
+   m=normalize({...m,objects:[...m.objects,label,arrow]});selected=label.id;
+   draw();mountInline(m.objects.find(o=>o.id===selected));
+ }
+ function cancelCallout(){
+  if(calloutPoint){finishInline(false);return;}
+  tool='';draw();q('.object-stage').focus({preventScroll:true});
+  message('已取消照片标注。');
+ }
  const xy=ev=>{const sheet=q('svg');if(flow)return new DOMPoint(ev.clientX,ev.clientY).matrixTransform(sheet.getScreenCTM().inverse());const r=sheet.getBoundingClientRect();return {x:(ev.clientX-r.left)*m.width/r.width,y:(ev.clientY-r.top)*m.height/r.height};};
  q('.object-stage').tabIndex=0;
- q('.object-stage').onpointerdown=ev=>{if(inlineEdit||ev.button!==0)return;ev.preventDefault();q('.object-stage').focus({preventScroll:true});snap=null;if(tool){if(!ev.target.closest('svg')||ev.button!==0)return;const p=xy(ev);p.x=Math.max(0,Math.min(m.width,p.x));p.y=Math.max(0,Math.min(bounds().height,p.y));push();const o={id:id(),type:tool,x:p.x,y:p.y,w:0,h:0,text:'',fill:'#ffffff',...remembered[tool]};if(['arrow','line'].includes(o.type)&&!ev.altKey){const r=q('svg').getBoundingClientRect(),a=nearestAnchor(m,p,o.id,{x:r.width/m.width,y:r.height/m.height});if(a){p.x=a.x;p.y=a.y;o.x=p.x;o.y=p.y;attachEndpoint(m,o,'start',a);}}m.objects.push(o);selected=o.id;creating={id:o.id,p,clientX:ev.clientX,clientY:ev.clientY,moved:false};q('.object-stage').setPointerCapture(ev.pointerId);draw();return;}const g=ev.target.closest('[data-object]'),key=g?.dataset.object||'';
+ q('.object-stage').onpointerdown=ev=>{if(inlineEdit||ev.button!==0)return;ev.preventDefault();if(calloutPoint)return;q('.object-stage').focus({preventScroll:true});snap=null;
+  if(tool==='callout'){
+   if(!ev.target.closest('svg'))return;
+   const {x,y}=new DOMPoint(ev.clientX,ev.clientY).matrixTransform(q('svg').getScreenCTM().inverse());
+   const photo=photoAt(m,{x,y});
+   if(!photo||y>bounds().height){message('请点击白色画布区域内的照片。');return;}
+   if(m.objects.length>298){message('添加标注需要两个对象位置，请先删除不需要的对象。');return;}
+   beginCalloutAt({x,y},photo);return;
+  }
+  if(tool){if(!ev.target.closest('svg')||ev.button!==0)return;const p=xy(ev);p.x=Math.max(0,Math.min(m.width,p.x));p.y=Math.max(0,Math.min(bounds().height,p.y));push();const o=newShape(tool,{x:p.x,y:p.y,w:0,h:0});if(['arrow','line'].includes(o.type)&&!ev.altKey){const r=q('svg').getBoundingClientRect(),a=nearestAnchor(m,p,o.id,{x:r.width/m.width,y:r.height/m.height});if(a){p.x=a.x;p.y=a.y;o.x=p.x;o.y=p.y;attachEndpoint(m,o,'start',a);}}m.objects.push(o);selected=o.id;creating={id:o.id,p,clientX:ev.clientX,clientY:ev.clientY,moved:false};q('.object-stage').setPointerCapture(ev.pointerId);draw();return;}const g=ev.target.closest('[data-object]'),key=g?.dataset.object||'';
  if(flow&&(boxMode||(!key&&!linkFrom&&ev.target.closest('svg')))){
   picked=[];selected='';lastTap=null;boxMode=false;linkFrom='';
   marquee={start:xy(ev),box:null};q('.object-stage').setPointerCapture(ev.pointerId);draw();return;
@@ -674,7 +918,9 @@ function open(input,{title='图文画布',flow=false,photos=[],availableHeight,p
   }
   if(drag.flowHandle==='join')guides=snapJoin(m,edge,p,tolerance);
   queueStageDraw();return;
- }if(drag.endpoint){const ends={...drag.points},key=drag.endpoint==='start'?'1':'2';const free={x:Math.max(0,Math.min(m.width,p.x)),y:Math.max(0,Math.min(bounds().height,p.y))},rect=q('svg').getBoundingClientRect();snap=ev.altKey?null:nearestAnchor(m,free,o.id,{x:rect.width/m.width,y:rect.height/m.height});ends['x'+key]=(snap||free).x;ends['y'+key]=(snap||free).y;attachEndpoint(m,o,drag.endpoint,snap);setLineEndpoints(o,ends);}else if(drag.resize){resizeCorner(o,drag,drag.resize,dx,dy,bounds());}else if(flow&&(drag.group||!['arrow','line'].includes(o.type))){
+ }if(drag.endpoint){const ends={...drag.points},key=drag.endpoint==='start'?'1':'2';const free={x:Math.max(0,Math.min(m.width,p.x)),y:Math.max(0,Math.min(bounds().height,p.y))},rect=q('svg').getBoundingClientRect();snap=ev.altKey?null:nearestAnchor(m,free,o.id,{x:rect.width/m.width,y:rect.height/m.height});ends['x'+key]=(snap||free).x;ends['y'+key]=(snap||free).y;
+  const photo=!snap&&!ev.altKey&&drag.endpoint==='end'&&o.calloutArrow?photoAt(m,free):null;
+  attachEndpoint(m,o,drag.endpoint,photo?photoAttachment(photo,free):snap);setLineEndpoints(o,ends);}else if(drag.resize){resizeCorner(o,drag,drag.resize,dx,dy,bounds());}else if(flow&&(drag.group||!['arrow','line'].includes(o.type))){
   const origins=drag.origins||[{id:o.id,x:drag.x,y:drag.y,w:drag.w,h:drag.h}];
   const scale=Math.abs(q('svg').getScreenCTM().a);
   guides=alignDrag(m,origins,dx,dy,ev.altKey?0:7/scale);
@@ -690,15 +936,24 @@ function open(input,{title='图文画布',flow=false,photos=[],availableHeight,p
   }
   guides=null;
   if(creating){if(!creating.moved){m=history.pop();selected='';}else {m=normalize(m);remember(m.objects.find(o=>o.id===selected));tool='';}creating=null;snap=null;draw();message(tool?'请按下并拖动绘制；Esc 取消。':'已添加，可调整文字、颜色和粗细。');return;}const ended=drag;drag=null;snap=null;if(inlineEdit)return;
+  if(calloutPoint)return;
   if(ended&&!ended.group&&!ended.flowHandle&&!ended.moved&&!ended.resize&&!ended.endpoint){
    const now=performance.now(),double=lastTap&&lastTap.id===ended.id&&now-lastTap.time<500&&Math.hypot(ev.clientX-lastTap.x,ev.clientY-lastTap.y)<6;
    lastTap={id:ended.id,time:now,x:ev.clientX,y:ev.clientY};
    if(double){lastTap=null;beginInline(ended.id);return;}
   }else lastTap=null;
   draw();
- };q('.object-stage').onpointercancel=()=>{guides=null;if(marquee){marquee=null;picked=[];}if(creating){m=history.pop();creating=null;selected='';}else if(drag)m=history.pop()||m;drag=null;snap=null;if(!inlineEdit)draw();};
- d.querySelectorAll('[data-add]').forEach(b=>b.onclick=()=>{if(inlineEdit)finishInline();tool=b.dataset.add;linkFrom='';selected='';picked=[];boxMode=false;draw();message('请在画布按下并拖动绘制；Esc 取消。');});
+ };q('.object-stage').onpointercancel=()=>{guides=null;if(marquee){marquee=null;picked=[];}if(creating){m=history.pop();creating=null;selected='';}else if(drag)m=history.pop()||m;drag=null;snap=null;if(!inlineEdit&&!calloutPoint)draw();};
+ d.querySelectorAll('[data-add]').forEach(b=>b.onclick=()=>{
+  if(tool==='callout'&&b.dataset.add==='callout'){cancelCallout();return;}
+  if(calloutPoint)cancelCallout();
+  else if(inlineEdit)finishInline();
+  tool=b.dataset.add;linkFrom='';selected='';picked=[];boxMode=false;lastTap=null;draw();
+  message(tool==='callout'?'点击照片上需要标注的位置，Esc 取消。':'请在画布按下并拖动绘制；Esc 取消。');
+ });
  function action(name){
+  if(calloutPoint&&name==='save'){message('请先添加或取消当前标注。');q('[data-callout-text]').focus();return;}
+  if(tool==='callout'&&name!=='close'&&name!=='save')cancelCallout();
   tool='';
   if(creating){m=history.pop();creating=null;selected='';}
   if(name==='editText'){beginInline();return;}
@@ -736,7 +991,7 @@ function open(input,{title='图文画布',flow=false,photos=[],availableHeight,p
    try{
     const {data,sourceWidth,sourceHeight}=await readPhoto(file);
     if(!d.open||!d.isConnected)return;
-    if(creating||drag||inlineEdit){message('请先完成当前编辑，再添加图片。');return;}
+    if(creating||drag||inlineEdit||calloutPoint){message('请先完成当前编辑，再添加图片。');return;}
     const area=bounds();
     if(area.height<10){message('图文区剩余空间不足，请先调整正文。');return;}
     const scale=Math.min(360/sourceWidth,240/sourceHeight,area.width/sourceWidth,area.height/sourceHeight);
@@ -762,10 +1017,14 @@ function open(input,{title='图文画布',flow=false,photos=[],availableHeight,p
  }
 
  d.onkeydown=ev=>{
+ if(ev.key==='Escape'&&tool==='callout'){
+  if(ev.isComposing||ev.keyCode===229)return;
+  ev.preventDefault();cancelCallout();return;
+ }
  if(ev.key==='Escape'&&(marquee||boxMode||picked.length)){
   ev.preventDefault();if(drag?.group){m=history.pop()||m;drag=null;guides=null;}marquee=null;boxMode=false;picked=[];draw();return;
  }
- if(ev.key==='Escape'&&(tool||creating)){ev.preventDefault();if(creating){m=history.pop();creating=null;selected='';}tool='';snap=null;draw();message('已取消绘制');return;}if(/INPUT|TEXTAREA|SELECT/.test(ev.target.tagName))return;if(ev.key==='F2'){ev.preventDefault();beginInline();return;}if(ev.key==='Delete'){ev.preventDefault();action('delete');}if((ev.ctrlKey||ev.metaKey)&&ev.key.toLowerCase()==='z'){ev.preventDefault();action('undo');}if((ev.ctrlKey||ev.metaKey)&&ev.key.toLowerCase()==='d'){ev.preventDefault();action('copy');}};d.oncancel=dispose;draw();if(drawingHeight)message(contentHeight(m)>drawingHeight?'白色区域为文字之外的可用画布；灰色区域有超出元素，请手动移回或缩小。':'白色区域为文字之外的可用画布；文字和图片不自动缩放。');d.showModal();if(!flow)q('.object-stage').focus({preventScroll:true});
+ if(ev.key==='Escape'&&(tool||creating)){ev.preventDefault();if(creating){m=history.pop();creating=null;selected='';}tool='';snap=null;draw();message('已取消绘制');return;}if(/INPUT|TEXTAREA|SELECT/.test(ev.target.tagName))return;if(ev.key==='F2'){ev.preventDefault();beginInline();return;}if(ev.key==='Delete'){ev.preventDefault();action('delete');}if((ev.ctrlKey||ev.metaKey)&&ev.key.toLowerCase()==='z'){ev.preventDefault();action('undo');}if((ev.ctrlKey||ev.metaKey)&&ev.key.toLowerCase()==='d'){ev.preventDefault();action('copy');}};d.oncancel=dispose;draw();if(drawingHeight)message(contentHeight(m)>drawingHeight?'白色区域为文字之外的可用画布；灰色区域有超出元素，请手动移回或缩小。':'白色区域为文字之外的可用画布；文字和图片不自动缩放。');d.showModal();if(!flow){q('.object-stage').focus({preventScroll:true});if(startCallout)q('[data-add="callout"]').click();}
 }
-const api={photoMaxEdge:PHOTO_MAX_EDGE,readPhoto,encodePhotoCanvas,contentHeight,attachEndpoint,syncConnections,anchorPoints,nearestAnchor,resizeCorner,lineEndpoints,setLineEndpoints,lineAngle,setLineAngle,wrapText,flowTextWidth,normalize,edgePoints,flowRoute,flowLabel,flowShapes,generateFlow,resolvedFlow,remove,duplicate,fromPhotos,restorePhotoCaptions,fromProcesses,svg,open};if(typeof module!=='undefined')module.exports=api;root.SOP_OBJECTS=api;
+const api={photoMaxEdge:PHOTO_MAX_EDGE,readPhoto,encodePhotoCanvas,contentHeight,attachEndpoint,syncConnections,mapPhotoAttachmentPoints,anchorPoints,nearestAnchor,resizeCorner,lineEndpoints,setLineEndpoints,lineAngle,setLineAngle,wrapText,rectTextWrapped,flowTextWidth,normalize,edgePoints,flowRoute,flowLabel,flowShapes,generateFlow,resolvedFlow,remove,duplicate,fromPhotos,restorePhotoCaptions,fromProcesses,svg,open};if(typeof module!=='undefined')module.exports=api;root.SOP_OBJECTS=api;
 })(typeof window==='undefined'?globalThis:window);

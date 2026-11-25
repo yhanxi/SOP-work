@@ -8,7 +8,7 @@ const hex=v=>/^#[0-9a-f]{6}$/i.test(v||'')?v.slice(1).toUpperCase():'E22D32';
 function create(doc,{nextId,paragraph}){
  const node=(ns,prefix,name,attrs={})=>{const e=doc.createElementNS(ns,prefix+':'+name);for(const [k,v] of Object.entries(attrs))e.setAttribute(k,String(v));return e;};
  const w=(name,attrs)=>node(W,'w',name,attrs),a=(name,attrs)=>node(A,'a',name,attrs),wp=(name,attrs)=>node(WP,'wp',name,attrs),s=(name,attrs)=>node(S,'wps',name,attrs);
- function nativeShape({name,x=0,y=0,width=1,height=1,geometry='rect',text,stroke='333333',fill=null,lineWidth=.8,arrow=false,flipH=false,flipV=false,fontSize=10.5,textColor='111111',align='center',connector=false,textLayout=null,arrowSize='med'}){
+ function nativeShape({name,x=0,y=0,width=1,height=1,geometry='rect',text,stroke='333333',fill=null,lineWidth=.8,arrow=false,arrowAtStart=false,flipH=false,flipV=false,fontSize=10.5,textColor='111111',align='center',connector=false,textLayout=null,arrowSize='med'}){
   const id=nextId(),r=w('r'),drawing=w('drawing'),anchor=wp('anchor',{distT:0,distB:0,distL:0,distR:0,simplePos:0,relativeHeight:id,behindDoc:0,locked:0,layoutInCell:1,allowOverlap:1});
   anchor.append(wp('simplePos',{x:0,y:0}));
   for(const [dir,relative,value]of [['H','column',x],['V','paragraph',y]]){const position=wp('position'+dir,{relativeFrom:relative}),offset=wp('posOffset');offset.textContent=String(emu(value));position.append(offset);anchor.append(position);}
@@ -18,7 +18,8 @@ function create(doc,{nextId,paragraph}){
   const geom=a('prstGeom',{prst:geometry});geom.append(a('avLst'));properties.append(transform,geom);
   if(fill){const f=a('solidFill');f.append(a('srgbClr',{val:fill}));properties.append(f);}else properties.append(a('noFill'));
   const line=a('ln',{w:emu(lineWidth),cap:'flat'});if(stroke){const color=a('solidFill');color.append(a('srgbClr',{val:stroke}));line.append(color);}else line.append(a('noFill'));
-  line.append(a('prstDash',{val:'solid'}),a('headEnd',{type:'none',w:'med',len:'med'}),a('tailEnd',{type:arrow?'triangle':'none',w:arrowSize,len:arrowSize}));properties.append(line);shape.append(properties);
+  const headSize=arrowAtStart?arrowSize:'med';
+  line.append(a('prstDash',{val:'solid'}),a('headEnd',{type:arrow&&arrowAtStart?'triangle':'none',w:headSize,len:headSize}),a('tailEnd',{type:arrow&&!arrowAtStart?'triangle':'none',w:arrowSize,len:arrowSize}));properties.append(line);shape.append(properties);
   if(text!==undefined){
    const box=s('txbx'),content=w('txbxContent'),p=paragraph(doc,String(text),Math.round(fontSize*2),align==='center');
    for(const spacing of p.getElementsByTagNameNS(W,'spacing')){
@@ -52,12 +53,13 @@ function create(doc,{nextId,paragraph}){
  function line(name,x1,y1,x2,y2,{arrow=false,color='333333',width=.8}={}){return nativeShape({name,x:Math.min(x1,x2),y:Math.min(y1,y2),width:Math.max(.01,Math.abs(x2-x1)),height:Math.max(.01,Math.abs(y2-y1)),geometry:'line',stroke:color,lineWidth:width,arrow,flipH:x2<x1,flipV:y2<y1,connector:true});}
  function canvasShape(object,scale){
   const {type}=object,connector=type==='line'||type==='arrow',fontSize=object.fontSize*scale;
-  const text=connector?undefined:window.SOP_OBJECTS.wrapText(object.text,window.SOP_OBJECTS.flowTextWidth(object),object.fontSize).join('\n');
+  const objects=window.SOP_OBJECTS;
+  const text=connector?undefined:type==='rect'?objects.rectTextWrapped(object.text,object.w,object.fontSize):objects.wrapText(object.text,objects.flowTextWidth(object),object.fontSize).join('\n');
   return nativeShape({name:'画布对象 '+object.id,x:object.x*scale,y:object.y*scale,width:object.w*scale,height:object.h*scale,
    geometry:({text:'rect',arrow:'line',line:'line',ellipse:'ellipse',diamond:'diamond',triangle:'triangle'})[type]||'rect',
    text,stroke:type==='text'?null:object.color.slice(1),fill:object.fill==='transparent'?null:object.fill.slice(1),
    lineWidth:object.strokeWidth*scale,fontSize,textColor:object.color.slice(1),align:type==='text'?'left':'center',
-   arrow:type==='arrow',arrowSize:type==='arrow'?'lg':'med',flipH:!!object.flipX,flipV:!!object.flipY,connector,
+   arrow:type==='arrow',arrowAtStart:object.calloutArrow,arrowSize:type==='arrow'?'lg':'med',flipH:!!object.flipX,flipV:!!object.flipY,connector,
    textLayout:connector?null:{fontFamily:canvasFont,lineHeight:fontSize*1.2,leftInset:type==='text'?4*scale:0,rightInset:0,
     topInset:type==='triangle'?object.h*.44*scale:0,bottomInset:fontSize*.14}});
  }

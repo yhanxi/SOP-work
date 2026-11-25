@@ -227,7 +227,7 @@ function operationPhotoLayout(photos){
 function opHtml(p){
  if(p.canvas){
   const space=canvasSpace(p);
-  return '<div class="manual-op-layout">'+canvasText(p,'steps')+'<div class="page-object-content" data-print-area="canvas" style="height:'+space.pixels+'px;overflow:hidden">'+(space.height>0?window.SOP_OBJECTS.svg(p.canvas,'',false,{viewHeight:space.height}):'')+'</div>'+canvasText(p,'requirements')+'</div>';
+  return '<div class="manual-op-layout">'+canvasText(p,'steps')+'<div class="page-object-content" data-print-area="canvas" style="height:'+space.pixels+'px;overflow:hidden">'+(space.height>0?window.SOP_OBJECTS.svg(p.canvas,'',false,{viewHeight:space.height,nativeRectText:true}):'')+'</div>'+canvasText(p,'requirements')+'</div>';
  }
  if(window.SOP_IMPORT?.active(p))return '<div data-print-part="imported" data-print-label="导入原稿">'+window.SOP_IMPORT.preview(p)+'</div>';
  const steps=A.layout==='wide-v2'||p.steps.trim()||p.photos.length?canvasText(p,'steps'):'';
@@ -723,7 +723,17 @@ function renderEditor(){if(String(selected).startsWith('front:'))return renderFr
   $('#batchProcessNumbers').onclick=openBatchProcessNumbers;
   $$('[data-meta]').forEach(el=>bindInput(el,v=>p[el.dataset.meta]=v,{snapshotOnEdit:el.dataset.meta==='station'}));for(const [id,k] of [['stepsInput','steps'],['requirementsInput','requirements']])bindBodyText($('#'+id),p,k);
   if(window.SOP_IMPORT?.active(p)){e.insertAdjacentHTML('afterbegin','<div class="notice">当前页保留原稿图文及可编辑标注。未改动项目导出 Word 时保留原文档分页；段内文字可沿用原 Word 格式。增删段落、调整样式或修改配图后会重新编排，可用撤销恢复。浏览器按工序表格预览，物理页数请在 Word/WPS 中核对。</div>');}
-  e.insertAdjacentHTML('afterbegin','<div class="canvas-entry"><strong>图文页面画布</strong><p>照片、文字框与箭头独立摆放，支持照片外留白。</p><button id="editPageCanvas" class="primary">'+(p.canvas?'编辑页面画布':'建立页面画布')+'</button></div>');$('#editPageCanvas').disabled=p.fixed.includes('photos');$('#editPageCanvas').onclick=()=>void openPageCanvas(p);if(p.canvas){e.insertAdjacentHTML('afterbegin','<div class="notice">本页使用独立对象画布。下方显示画布中的照片，可进入画布编辑。<button id="restorePageMaterials">返回原图文排版</button></div>');$('#restorePageMaterials').onclick=()=>{snapshot();p.canvasDraft=p.canvas;delete p.canvas;renderEditor();changed();refresh();};}
+  const storedCanvas=p.canvas||p.canvasDraft;
+  const hasPhoto=storedCanvas?storedCanvas.objects?.some(o=>o.type==='photo'):p.photos.length>0;
+  e.insertAdjacentHTML('afterbegin','<div class="canvas-entry"><strong>图文页面画布</strong><p>照片、文字框与箭头独立摆放，支持照片外留白。</p><div class="row"><button id="editPageCanvas" class="primary">'+(p.canvas?'编辑页面画布':'建立页面画布')+'</button>'+(hasPhoto?'<button data-photo-callout>点照片加标注</button>':'')+'</div></div>');
+  const editCanvas=$('#editPageCanvas'),photoCallout=e.querySelector('[data-photo-callout]');
+  editCanvas.disabled=p.fixed.includes('photos');
+  editCanvas.onclick=()=>void openPageCanvas(p);
+  if(photoCallout){
+   photoCallout.disabled=editCanvas.disabled;
+   photoCallout.onclick=()=>void openPageCanvas(p,{startCallout:true});
+  }
+  if(p.canvas){e.insertAdjacentHTML('afterbegin','<div class="notice">本页使用独立对象画布。下方显示画布中的照片，可进入画布编辑。<button id="restorePageMaterials">返回原图文排版</button></div>');$('#restorePageMaterials').onclick=()=>{snapshot();p.canvasDraft=p.canvas;delete p.canvas;renderEditor();changed();refresh();};}
   if(p.importedContent&&!window.SOP_IMPORT.active(p))e.insertAdjacentHTML('afterbegin','<div class="notice">当前页为重排副本。无法直接转换的原图文/标注仍保存在项目的原稿中，可撤销或导出原始 Word 查阅。</div>');renderPhotos();if($('#uploadBtn')){
    if(p.canvas)$('#uploadBtn').onclick=()=>{$('#editPageCanvas').click();document.querySelector('.object-dialog[open] [data-action="upload"]')?.click();};
    else $('#uploadBtn').onclick=()=>$('#photoFile').click();
@@ -769,7 +779,7 @@ function renderEditor(){if(String(selected).startsWith('front:'))return renderFr
  if(editNumber)editNumber.onclick=editProcessNumber;
  refreshProcessNumberWarning();
 }
-async function openPageCanvas(p){
+async function openPageCanvas(p,{startCallout=false}={}){
  const button=$('#editPageCanvas'),source=p.canvas||p.canvasDraft;
  if(!button||button.disabled)return;
  if(p.importedContent&&!p.canvas)toast('画布仅载入照片素材；原生标注/复杂图文无法自动迁移。保存后使用重排副本，原稿仍保留，可导出原始 Word。',true);
@@ -790,7 +800,7 @@ async function openPageCanvas(p){
   }
   const space=canvasSpace(p,model);
   if(space.textOverflow)return toast('文字已占满内容框，请先调整文字，留出画布空间。',true);
-  window.SOP_OBJECTS.open(model,{availableHeight:space.height,title:'工序图文画布',onSave:value=>{
+  window.SOP_OBJECTS.open(model,{availableHeight:space.height,title:'工序图文画布',startCallout,onSave:value=>{
    snapshot();
    p.canvas=value;
    if(source&&p.canvasDraft===source)delete p.canvasDraft;
@@ -1073,7 +1083,7 @@ async function openPhoto(id){
  try{
   const im=await loadImage(ph.data);
   if(page()!==p||!currentPhotos(p).includes(ph)||$('#photoDialog').open)return;
-  photoEdit={page:p,canvas:p.canvas,original:ph,photo:{...clone(ph),marks:clone(ph.marks||[])},im,tool:'arrow',drag:null,crop:null};
+  photoEdit={page:p,canvas:p.canvas,original:ph,photo:{...clone(ph),marks:clone(ph.marks||[])},im,tool:'arrow',drag:null,crop:null,pointTransforms:[]};
   $('#photoDialog').showModal();renderPresets();$$('[data-tool]').forEach(b=>b.classList.toggle('active',b.dataset.tool==='arrow'));renderCanvas();
  }catch(error){toast('图片打开失败：'+error.message,true);}
 }
@@ -1083,7 +1093,7 @@ $('#annotationCanvas').onpointerdown=e=>{if(!photoEdit||photoEdit.transforming)r
 $('#annotationCanvas').onpointermove=e=>{if(!photoEdit?.drag)return;const p=point(e);photoEdit.drag.x2=p.x;photoEdit.drag.y2=p.y;renderCanvas();};
 $('#annotationCanvas').onpointerup=()=>{if(!photoEdit?.drag)return;const d=photoEdit.drag;if(Math.abs(d.x-d.x2)+Math.abs(d.y-d.y2)>.015){if(photoEdit.tool==='crop')photoEdit.crop=d;else photoEdit.photo.marks.push(d);}photoEdit.drag=null;renderCanvas();};
 $$('[data-tool]').forEach(b=>b.onclick=()=>{photoEdit.tool=b.dataset.tool;photoEdit.drag=null;$$('[data-tool]').forEach(x=>x.classList.toggle('active',x===b));renderCanvas();});$('#markUndo').onclick=()=>{if(!photoEdit||photoEdit.transforming)return;photoEdit.photo.marks.pop();renderCanvas();};
-async function transformPhoto(paint,remapMarks){
+async function transformPhoto(paint,remapMarks,mapPoint){
  const edit=photoEdit;
  if(!edit||edit.transforming)return;
  edit.transforming=true;
@@ -1093,6 +1103,7 @@ async function transformPhoto(paint,remapMarks){
   const data=window.SOP_OBJECTS.encodePhotoCanvas(canvas,edit.photo.data),image=await loadImage(data);
   if(photoEdit!==edit)return;
   edit.photo.marks=remapMarks(clone(edit.photo.marks));
+  if(edit.canvas)edit.pointTransforms.push(mapPoint);
   edit.photo.data=data;
   edit.photo.width=image.naturalWidth;
   edit.photo.height=image.naturalHeight;
@@ -1116,7 +1127,7 @@ $('#rotatePhoto').onclick=()=>transformPhoto((canvas,image)=>{
   [mark.x2,mark.y2]=[1-mark.y2,mark.x2];
  }
  return marks;
-});
+},(x,y)=>[1-y,x]);
 $('#applyCrop').onclick=()=>{
  if(!photoEdit?.crop)return toast('请先拖动选择裁剪范围。');
  const crop=photoEdit.crop,x=Math.min(crop.x,crop.x2),y=Math.min(crop.y,crop.y2);
@@ -1135,7 +1146,7 @@ $('#applyCrop').onclick=()=>{
    mark.y2=(mark.y2-y)/height;
   }
   return marks.filter(mark=>mark.x>=0&&mark.x<=1&&mark.y>=0&&mark.y<=1);
- });
+ },(px,py)=>[(px-x)/width,(py-y)/height]);
 };
 $('#savePhoto').onclick=async()=>{
  const edit=photoEdit;
@@ -1147,7 +1158,11 @@ $('#savePhoto').onclick=async()=>{
   const i=currentPhotos(p).indexOf(edit.original);
   if(i<0)return;
   snapshot();
-  if(p.canvas)updateCanvasPhoto(edit.original,edit.photo,edit.im.width,edit.im.height);
+  if(p.canvas){
+   for(const transform of edit.pointTransforms)window.SOP_OBJECTS.mapPhotoAttachmentPoints(p.canvas,edit.original.id,transform);
+   updateCanvasPhoto(edit.original,edit.photo,edit.im.width,edit.im.height);
+   window.SOP_OBJECTS.syncConnections(p.canvas);
+  }
   else p.photos[i]=edit.photo;
   $('#photoDialog').close();photoEdit=null;renderPhotos();changed();refresh();
  }catch(error){toast('图片编辑保存失败：'+error.message,true);}
