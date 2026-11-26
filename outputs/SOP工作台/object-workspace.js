@@ -672,7 +672,7 @@ function trackEditor(dialog,{title,isDirty,onSave,onClose,isBusy=()=>false,messa
 }
 function getActiveEditor(){return activeEditor?.dialog.open?activeEditor:null;}
 
-function open(input,{title='图文画布',flow=false,photos=[],availableHeight,preview=false,startCallout=false,onSave,owner=null}={}){
+function open(input,{title='图文画布',flow=false,photos=[],availableHeight,preview=false,startCallout=false,photoFiles=[],onSave,owner=null}={}){
  if(getActiveEditor())return;
  const d=document.createElement('dialog');d.className='object-dialog';let m=normalize(input),selected='',history=[],drag=null,snap=null,linkFrom='',inlineEdit=null,lastTap=null,tool='',creating=null,calloutPoint=null,propertyTextPreview=null;
  let picked=[],marquee=null,boxMode=false,guides=null;
@@ -1141,37 +1141,41 @@ function open(input,{title='图文画布',flow=false,photos=[],availableHeight,p
   }else if(name==='upload')q('#objectPhoto').click();
  }
  d.querySelectorAll('[data-action]').forEach(b=>b.onclick=()=>action(b.dataset.action));
+ async function addPhotos(files,{pasted=false,allowOtherFormats=false}={}){
+  if(!files.length||pendingPhoto)return;
+  if(m.objects.length+files.length>300){message('画布对象已满，请先删除不需要的对象。');return;}
+  pendingPhoto=true;
+  try{
+   const images=[];
+   for(const file of files)images.push(await readPhoto(file,{allowOtherFormats}));
+   if(!d.open||!d.isConnected)return;
+   if(creating||drag||inlineEdit||calloutPoint){message('请先完成当前编辑，再添加图片。');return;}
+   const area=bounds();
+   if(area.height<10){message('图文区剩余空间不足，请先调整正文。');return;}
+   if(m.objects.length+images.length>300){message('画布对象已满，请先删除不需要的对象。');return;}
+   const photos=images.map(({data,sourceWidth,sourceHeight},i)=>{
+    const scale=Math.min(360/sourceWidth,240/sourceHeight,area.width/sourceWidth,area.height/sourceHeight);
+    const w=sourceWidth*scale,h=sourceHeight*scale,offset=80+i*24;
+    const x=pasted?(area.width-w)/2:Math.min(offset,area.width-w);
+    const y=pasted?(area.height-h)/2:Math.min(offset,area.height-h);
+    return {id:id(),type:'photo',data,x,y,w,h,aspectRatio:w/h};
+   });
+   push();m=normalize({...m,objects:[...m.objects,...photos]});
+   selected=photos.at(-1).id;picked=[];tool='';snap=null;boxMode=false;
+   const added=photos.length===1?'已添加图片':'已添加 '+photos.length+' 张图片';
+   draw();message((pasted?'已粘贴图片':added)+'，可拖动或缩放。');
+  }catch(error){if(d.open)message(error.message||'无法读取这张图片，请重新复制或从文件添加。');}
+  finally{pendingPhoto=false;}
+ }
  if(!flow){
   const input=q('#objectPhoto');
-  async function addPhoto(file,{pasted=false}={}){
-   if(!file||pendingPhoto)return;
-   if(m.objects.length>=300){message('画布对象已满，请先删除不需要的对象。');return;}
-   pendingPhoto=true;
-   try{
-    const {data,sourceWidth,sourceHeight}=await readPhoto(file);
-    if(!d.open||!d.isConnected)return;
-    if(creating||drag||inlineEdit||calloutPoint){message('请先完成当前编辑，再添加图片。');return;}
-    const area=bounds();
-    if(area.height<10){message('图文区剩余空间不足，请先调整正文。');return;}
-    const scale=Math.min(360/sourceWidth,240/sourceHeight,area.width/sourceWidth,area.height/sourceHeight);
-    const w=sourceWidth*scale,h=sourceHeight*scale;
-    const x=pasted?(area.width-w)/2:Math.min(80,area.width-w);
-    const y=pasted?(area.height-h)/2:Math.min(80,area.height-h);
-    if(m.objects.length>=300){message('画布对象已满，请先删除不需要的对象。');return;}
-    const photo={id:id(),type:'photo',data,x,y,w,h,aspectRatio:w/h};
-    push();m=normalize({...m,objects:[...m.objects,photo]});
-    selected=photo.id;picked=[];tool='';snap=null;boxMode=false;
-    draw();message(pasted?'已粘贴图片，可拖动或缩放。':'已添加图片，可拖动或缩放。');
-   }catch(error){if(d.open)message(error.message||'无法读取这张图片，请重新复制或从文件添加。');}
-   finally{pendingPhoto=false;}
-  }
-  input.onchange=()=>{const file=input.files[0];input.value='';void addPhoto(file);};
+  input.onchange=()=>{const files=[...input.files];input.value='';void addPhotos(files);};
   d.onpaste=event=>{
    if(event.target.closest('input,textarea,select,[contenteditable]'))return;
    const file=[...(event.clipboardData?.files||[])].find(item=>item.type.startsWith('image/'));
    if(!file)return;
    event.preventDefault();event.stopPropagation();
-   void addPhoto(file,{pasted:true});
+   void addPhotos([file],{pasted:true});
   };
  }
 
@@ -1183,7 +1187,12 @@ function open(input,{title='图文画布',flow=false,photos=[],availableHeight,p
  if(ev.key==='Escape'&&(marquee||boxMode||picked.length)){
   ev.preventDefault();if(drag?.group){m=history.pop()||m;drag=null;guides=null;}marquee=null;boxMode=false;picked=[];draw();return;
  }
- if(ev.key==='Escape'&&(tool||creating)){ev.preventDefault();if(creating){m=history.pop();creating=null;selected='';}tool='';snap=null;draw();message('已取消绘制');return;}if(/INPUT|TEXTAREA|SELECT/.test(ev.target.tagName))return;if(ev.key==='F2'){ev.preventDefault();beginInline();return;}if(ev.key==='Delete'){ev.preventDefault();action('delete');}if((ev.ctrlKey||ev.metaKey)&&ev.key.toLowerCase()==='z'){ev.preventDefault();action('undo');}if((ev.ctrlKey||ev.metaKey)&&ev.key.toLowerCase()==='d'){ev.preventDefault();action('copy');}};draw();if(drawingHeight)message(contentHeight(m)>drawingHeight?'白色区域为文字之外的可用画布；灰色区域有超出元素，请手动移回或缩小。':'白色区域为文字之外的可用画布；文字和图片不自动缩放。');d.showModal();if(!flow){q('.object-stage').focus({preventScroll:true});if(startCallout)q('[data-add="callout"]').click();}
+ if(ev.key==='Escape'&&(tool||creating)){ev.preventDefault();if(creating){m=history.pop();creating=null;selected='';}tool='';snap=null;draw();message('已取消绘制');return;}if(/INPUT|TEXTAREA|SELECT/.test(ev.target.tagName))return;if(ev.key==='F2'){ev.preventDefault();beginInline();return;}if(ev.key==='Delete'){ev.preventDefault();action('delete');}if((ev.ctrlKey||ev.metaKey)&&ev.key.toLowerCase()==='z'){ev.preventDefault();action('undo');}if((ev.ctrlKey||ev.metaKey)&&ev.key.toLowerCase()==='d'){ev.preventDefault();action('copy');}};draw();if(drawingHeight)message(contentHeight(m)>drawingHeight?'白色区域为文字之外的可用画布；灰色区域有超出元素，请手动移回或缩小。':'白色区域为文字之外的可用画布；文字和图片不自动缩放。');d.showModal();
+ if(!flow){
+  q('.object-stage').focus({preventScroll:true});
+  if(startCallout)q('[data-add="callout"]').click();
+  void addPhotos(photoFiles,{allowOtherFormats:true});
+ }
 }
 const api={photoMaxEdge:PHOTO_MAX_EDGE,readPhoto,encodePhotoCanvas,contentHeight,attachEndpoint,syncConnections,mapPhotoAttachmentPoints,anchorPoints,nearestAnchor,resizeCorner,lineEndpoints,setLineEndpoints,lineAngle,setLineAngle,wrapText,rectTextWrapped,flowTextWidth,normalize,edgePoints,flowRoute,flowLabel,flowShapes,generateFlow,resolvedFlow,remove,duplicate,fromPhotos,restorePhotoCaptions,fromProcesses,svg,open,trackEditor,getActiveEditor,sameDraft};if(typeof module!=='undefined')module.exports=api;root.SOP_OBJECTS=api;
 })(typeof window==='undefined'?globalThis:window);

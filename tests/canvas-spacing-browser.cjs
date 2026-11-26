@@ -20,10 +20,10 @@ const spacingCases=await page.evaluate(async()=>{
  const nearBottom=Array.from({length:7},(_,i)=>'要求 '+(i+1)+' 完整显示。').join('\n');
  const mixed='检查装配后产品型号M12的规格和尺寸。'.repeat(4);
  const pages=[
-  make('画布多条要求','核对工件位置。','至少两人复核。\n确保刻度清晰。',{canvas,contentStyle:{fontSize:10.5,letterSpacing:.7}}),
+  make('画布多条要求','核对工件位置。','至少两人复核。\n确保刻度清晰。',{canvas,contentStyle:{fontSize:12.5,letterSpacing:.7}}),
   make('正文自然和手动换行',mixed+'\n\n确认502用量。\n确认 502 用量。','检查 M12 型号。',{contentStyle:{fontSize:14,letterSpacing:1.5}}),
   make('配图和独立图注','检查照片。','材料正确。\n型号一致。',{photos:[photo(400,180,'第一张配图说明'),photo(100,360,'第二张窄图需要折成数行显示')]}),
-  make('配图临界高度','检查配图。',nearBottom,{photos:[photo(250,250),photo(140,420),photo(320,320)]}),
+  make('配图临界高度','检查配图。',nearBottom,{photos:[photo(250,250),photo(140,420),photo(680,300)]}),
   make('配图没有要求','只显示步骤。','',{photos:[photo(200,300)]}),
   make('画布没有要求','只显示步骤。',' \n　 ',{canvas,contentStyle:{fontSize:19.5,letterSpacing:-.3}}),
   make('空白工序','',''),
@@ -47,7 +47,12 @@ const spacingCases=await page.evaluate(async()=>{
   const rows=[...box.querySelectorAll('.reference-photo-row')].map(el=>Math.round((el.getBoundingClientRect().height*toPt+parseFloat(getComputedStyle(el).marginBottom)*.75)*20));
   browser.push({sections,rows,images:box.querySelectorAll('.op-image img').length,
    headings:headings.length,canvas:p.canvasHeightPt,
-   margin:(box.getBoundingClientRect().bottom-(sections.at(-1)?.bottom??headings.at(-1).bottom))*toPt});
+   middle:Math.round(SOP.operationBodySpace(p).pixels*15),
+   margin:(box.getBoundingClientRect().bottom-(sections.at(-1)?.bottom??headings.at(-1).bottom))*toPt,
+   requirementGap:(box.getBoundingClientRect().bottom-(box.querySelector('[data-print-part="requirements"]')?.getBoundingClientRect().bottom??0))*toPt,
+   photoGap:headings.length>1&&rows.length
+    ?(headings[1].top-box.querySelector('.reference-photo-row:last-of-type').getBoundingClientRect().bottom)*toPt
+    :undefined});
  }
  const bytes=await (await SOP_WORD.exportDocx(SOP.project,SOP.layout,SOP.front)).arrayBuffer();
  const zip=await JSZip.loadAsync(bytes),doc=new DOMParser().parseFromString(await zip.file('word/document.xml').async('string'),'application/xml');
@@ -61,13 +66,15 @@ const spacingCases=await page.evaluate(async()=>{
    const [style]=children(p,'pPr'),runs=children(p,'r').filter(run=>children(run,'t').some(t=>t.textContent));
    const strings=runs.flatMap(run=>children(run,'t').map(t=>t.textContent));
    const anchors=[...p.getElementsByTagNameNS(wp,'anchor')].map(a=>a.getElementsByTagNameNS(wp,'docPr')[0].getAttribute('descr'));
-   return {text:strings.join(''),line:+prop(style,'spacing','line'),after:+prop(style,'spacing','after'),lineRule:prop(style,'spacing','lineRule'),
+   return {text:strings.join(''),line:+prop(style,'spacing','line'),before:+prop(style,'spacing','before'),after:+prop(style,'spacing','after'),lineRule:prop(style,'spacing','lineRule'),
     styledRuns:runs.map(run=>({text:children(run,'t').map(t=>t.textContent).join(''),spacing:+prop(run,'spacing'),fit:prop(run,'fitText'),fitId:prop(run,'fitText','id'),color:prop(run,'color'),highlight:prop(run,'highlight')})),
     fontSize:+prop(runs[0]??p,'sz')/2,letterSpacing:+prop(runs[0]??p,'spacing')/20,
     autospace:[prop(style,'autoSpaceDE'),prop(style,'autoSpaceDN')],grid:prop(style,'snapToGrid'),anchors,
     hardBreaks:runs.flatMap(run=>children(run,'br')).length};
   });
-  return {headings:ps.filter(p=>/^([一二])、/.test(p.text)),sections:ps.filter(p=>p.text&&!/^([一二])、/.test(p.text)),rows:ps.filter(p=>!p.text)};
+  const requirementIndex=ps.findIndex(p=>p.text==='二、工艺技术要求：');
+  const beforeRequirements=requirementIndex<0?0:Math.max(0,ps[requirementIndex].before-ps[requirementIndex-1].after);
+  return {headings:ps.filter(p=>/^([一二])、/.test(p.text)),sections:ps.filter(p=>p.text&&!/^([一二])、/.test(p.text)),rows:ps.filter(p=>!p.text),beforeRequirements};
  });
  const readBack=await SOP_WORD.importDocx(bytes);
  const firstColored=[...doc.getElementsByTagNameNS(W,'t')].find(t=>t.textContent==='检');
@@ -157,6 +164,10 @@ for(const [index,expected]of spacingCases.browser.entries()){
   assert.equal(placements.filter(name=>name.startsWith('SOP标注')).length,expected.images);
  }
  if(expected.canvas!==undefined)assert(Math.abs(actual.rows[0].line-expected.canvas*20)<=1);
+ if(index>0&&index<4){
+  const photoHeight=actual.rows.reduce((sum,row)=>sum+row.line,0);
+  assert.equal(actual.beforeRequirements,expected.middle-photoHeight,'Word preserves the free height between text or photos and the requirements');
+ }else assert.equal(actual.beforeRequirements,0);
 }
 assert(spacingCases.browser[1].sections[0].lines>1,'Long text must naturally wrap in preview');
 const mixedRuns=spacingCases.exported[1].sections[0].styledRuns;
@@ -167,7 +178,13 @@ const punctuationIds=spacingCases.exported.flatMap(page=>page.sections.flatMap(p
 assert.equal(new Set(punctuationIds).size,punctuationIds.length);
 assert(punctuationIds.length>3);
 assert.equal(spacingCases.browser[1].sections.length,4,'Hard returns separate source paragraphs; whitespace-only paragraphs do not occupy a line');
-assert(spacingCases.browser[3].margin<8,'Ordinary-photo fixture must exercise a tight bottom margin');
+const [canvasPage,textPage,photoPage,tightPage]=spacingCases.browser;
+for(const operation of [textPage,photoPage,tightPage]){
+ assert(Math.abs(operation.requirementGap-canvasPage.requirementGap)<.05,'Canvas and regular pages use the same distance from requirements to the lower table line');
+}
+assert(Math.abs(canvasPage.margin-photoPage.margin)<.05,'Matching text sizes share the same distance from the final line to the table line');
+assert(photoPage.photoGap>120,'Unused space belongs above the requirements');
+assert(tightPage.photoGap<8,'Ordinary-photo fixture must exercise a tight fit above the requirements');
 assert.equal(spacingCases.exported[2].rows[0].anchors.filter(name=>name==='作业配图说明').length,2);
 assert.equal(spacingCases.roundtrip[5],' \n　 ');
 assert.deepEqual(spacingCases.roundtripStyle,{fontSize:14,letterSpacing:1.5});

@@ -91,19 +91,83 @@ async function main() {
     await action('close');
     await choose('discard');
     await editor.waitFor({ state: 'hidden' });
-    // Open the photo annotation editor via a real image attachment.
     const image = await page.evaluate(() => {
       const canvas = document.createElement('canvas');
       canvas.width = 320;
       canvas.height = 180;
       return canvas.toDataURL().split(',')[1];
     });
+    const photoFile = name => ({ name, mimeType: 'image/png', buffer: Buffer.from(image, 'base64') });
+    const files = [photoFile('first.png'), photoFile('second.png')];
+    const pickPhotos = async (button = page.locator('#uploadBtn')) => {
+      const [chooser] = await Promise.all([page.waitForEvent('filechooser'), button.click()]);
+      return chooser;
+    };
+    const canvasPhotos = editor.locator('.object-sheet image');
+    const selectForCanvas = async () => {
+      const chooser = await pickPhotos();
+      assert(chooser.isMultiple());
+      assert.equal(await editor.count(), 0);
+      await chooser.setFiles(files);
+      await canvasPhotos.nth(1).waitFor();
+      assert.equal(await canvasPhotos.count(), 2);
+      const positions = await canvasPhotos.evaluateAll(images => images.map(image => image.parentElement.getAttribute('transform')));
+      assert.notEqual(positions[0], positions[1]);
+      assert.equal(await countSaved(), 1);
+    };
+    // The workbench opens the picker before an existing canvas, with no draft upon cancel.
+    const canceled = await pickPhotos();
+    assert.equal(await editor.count(), 0);
+    await canceled.setFiles([]);
+    assert.equal(await editor.count(), 0);
+    await selectForCanvas();
+    await action('undo');
+    assert.equal(await canvasPhotos.count(), 0);
+    await action('close');
+    await editor.waitFor({ state: 'hidden' });
+    assert.equal(await prompt.count(), 0);
+    await selectForCanvas();
+    await action('close');
+    await choose('discard');
+    await editor.waitFor({ state: 'hidden' });
+    assert.equal(await countSaved(), 1);
+    await selectForCanvas();
+    const inCanvas = await pickPhotos(editor.locator('[data-action="upload"]'));
+    await inCanvas.setFiles(photoFile('third.png'));
+    await canvasPhotos.nth(2).waitFor();
+    await action('save');
+    await editor.waitFor({ state: 'hidden' });
+    assert.equal(await countSaved(), 4);
+    await page.locator('#undoBtn').click();
+    assert.equal(await countSaved(), 1);
+
+    const staleCanvasChoice = await pickPhotos();
     await page.evaluate(() => {
-      SOP.replaceProject({ ...SOP.clone(SOP.project), pages: [SOP.blankPage()] });
+      const target = SOP.blankPage();
+      SOP.project.pages.push(target);
+      SOP.setSelected(target.id);
     });
-    await page.locator('#photoFile').setInputFiles({
-      name: 'sample.png', mimeType: 'image/png', buffer: Buffer.from(image, 'base64')
+    await staleCanvasChoice.setFiles(files);
+    assert.equal(await editor.count(), 0);
+    assert.equal(await page.locator('#photoGrid .photo-card').count(), 0);
+    const staleUnlockedChoice = await pickPhotos();
+    const pinPhotos = page.locator('[data-pin="photos"]');
+    await pinPhotos.click();
+    await staleUnlockedChoice.setFiles(files);
+    assert.equal(await page.locator('#uploadBtn').count(), 0);
+    assert.equal(await page.locator('#photoGrid .photo-card').count(), 0);
+    await pinPhotos.click();
+    await (await pickPhotos()).setFiles(files);
+    await page.locator('#photoGrid .photo-card').nth(1).waitFor();
+    const rows = await page.evaluate(() => {
+      const p = SOP.project.pages[1];
+      return SOP.operationPhotoLayout(p.photos).map(row => row.items.map(item => item.image.x));
     });
+    assert.deepEqual(rows.map(row => row.length), [2]);
+    assert(rows[0][1] > rows[0][0]);
+    assert.equal(await editor.count(), 0);
+
+    // Open the photo annotation editor via a real image attachment.
     await page.locator('#photoGrid [data-edit-photo]').first().click();
     const photo = page.locator('#photoDialog[open]');
     await photo.locator('[data-tool="arrow"]').click();
@@ -117,7 +181,7 @@ async function main() {
     await page.keyboard.press('Escape');
     await choose('save');
     await photo.waitFor({ state: 'hidden' });
-    assert.equal(await page.evaluate(() => SOP.project.pages[0].photos[0].marks.length), 1);
+    assert.equal(await page.evaluate(() => SOP.project.pages[1].photos[0].marks.length), 1);
     // A fresh project isolates the browser's native tab-close warning from project edits.
     const tabContext = await browser.newContext();
     const tab = await tabContext.newPage();

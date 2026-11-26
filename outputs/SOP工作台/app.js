@@ -10,7 +10,7 @@ if(window.SOP_REFERENCE?.defaults){
  const {company,logo,confidential,confidentialLevel,copyright}=window.SOP_REFERENCE.defaults;
  Object.assign(initialProject.settings,{company,logo,confidential,confidentialLevel,copyright});
 }
-let project=validate(initialProject),selected=project.pages[0]?.id,tab='content',view='process',layout=[],front=[],undo=[],saveTimer,refreshTimer,db,replacePhotoTarget,photoEdit;
+let project=validate(initialProject),selected=project.pages[0]?.id,tab='content',view='process',layout=[],front=[],undo=[],saveTimer,refreshTimer,db,addPhotoTarget,replacePhotoTarget,photoEdit;
 let autosaveReady=false,revision=0,lastSaved=0,projectFiles;
 const imageCache=new Map();
 function toast(msg,error=false){const t=$('#toast');t.textContent=msg;t.classList.toggle('error',error);t.hidden=false;clearTimeout(toast.timer);toast.timer=setTimeout(()=>t.hidden=true,error?8500:4200);}
@@ -166,17 +166,21 @@ function canvasText(p,key){
  const label=key==='steps'?'操作步骤':'工艺技术要求';
  return '<section class="op-text-section"'+(p[key].trim()?' data-print-part="'+key+'" data-print-label="'+label+'"':'')+'><h3>'+heading+'</h3>'+text+'</section>';
 }
-function canvasSpace(p,model=p.canvas){
+function operationBodySpace(p){
  const host=$('#measureRoot'),wide=A.layout==='wide-v2',mm=25.4/1440;
- const {operationContentWidthTwips,operationHeightTwips,operationSidePaddingTwips}=T.dimensions;
+ const {operationContentWidthTwips,operationHeightTwips,operationSidePaddingTwips,operationBottomGapPx}=T.dimensions;
  const widthMm=wide?(operationContentWidthTwips+2*operationSidePaddingTwips)*mm:273.05*.474,heightMm=wide?operationHeightTwips*mm:122;
  const sidePad=wide?operationSidePaddingTwips*mm:2,verticalPad=wide?0:2;
  host.innerHTML='<div class="op-cell'+(wide?' reference-measure':'')+'" style="display:flow-root;width:'+widthMm+'mm;padding:'+verticalPad+'mm '+sidePad+'mm"><div>'+canvasText(p,'steps')+canvasText(p,'requirements')+'</div></div>';
  const box=host.firstElementChild,inner=box.firstElementChild,style=getComputedStyle(box);
  const width=box.getBoundingClientRect().width-parseFloat(style.paddingLeft)-parseFloat(style.paddingRight);
- const available=Math.max(0,(heightMm-verticalPad*2)*96/25.4-inner.getBoundingClientRect().height-2);
+ const pixels=Math.max(0,(heightMm-verticalPad*2)*96/25.4-inner.getBoundingClientRect().height-operationBottomGapPx);
  host.replaceChildren();
- return {height:available*(model?.width||900)/width,pixels:available,textOverflow:available<=0};
+ return {width,pixels};
+}
+function canvasSpace(p,model=p.canvas){
+ const {width,pixels}=operationBodySpace(p);
+ return {height:pixels*(model?.width||900)/width,pixels,textOverflow:pixels<=0};
 }
 function operationPhotos(photos){
  const tags=photo=>'<img src="'+esc(photo.rendered||photo.data)+'" alt="'+esc(photo.caption||'作业图片')+'"><figcaption>'+esc(photo.caption||'')+'</figcaption>';
@@ -231,7 +235,9 @@ function opHtml(p){
  }
  if(window.SOP_IMPORT?.active(p))return '<div data-print-part="imported" data-print-label="导入原稿">'+window.SOP_IMPORT.preview(p)+'</div>';
  const steps=A.layout==='wide-v2'||p.steps.trim()||p.photos.length?canvasText(p,'steps'):'';
- return steps+operationPhotos(p.photos)+canvasText(p,'requirements')+(p.standardText?'<p>'+esc(p.standardText)+'</p>':'');
+ const photos=operationPhotos(p.photos),requirements=canvasText(p,'requirements');
+ const content=steps+photos+requirements+(p.standardText?'<p>'+esc(p.standardText)+'</p>':'');
+ return A.layout==='wide-v2'&&requirements?'<div class="regular-op-layout">'+content+'</div>':content;
 }
 function paginateOne(p){const space=p.canvas?canvasSpace(p):null;return [{...p,...(space?{canvasHeight:space.height,canvasHeightPt:space.pixels*.75}:{}),fitSinglePage:false,fitScale:1,importedPreviewScale:1,manualSinglePage:true,sourceId:p.id,fragment:0,id:p.id+':0',standardText:window.SOP_IMPORT?.active(p)||A.layout==='wide-v2'?'':project.settings.standardText||''}];}
 function uniqueProcesses(pages=layout){const ids=new Set();return pages.filter(p=>{if(ids.has(p.processId))return false;ids.add(p.processId);return true;});}
@@ -735,8 +741,7 @@ function renderEditor(){if(String(selected).startsWith('front:'))return renderFr
   }
   if(p.canvas){e.insertAdjacentHTML('afterbegin','<div class="notice">本页使用独立对象画布。下方显示画布中的照片，可进入画布编辑。<button id="restorePageMaterials">返回原图文排版</button></div>');$('#restorePageMaterials').onclick=()=>{snapshot();p.canvasDraft=p.canvas;delete p.canvas;renderEditor();changed();refresh();};}
   if(p.importedContent&&!window.SOP_IMPORT.active(p))e.insertAdjacentHTML('afterbegin','<div class="notice">当前页为重排副本。无法直接转换的原图文/标注仍保存在项目的原稿中，可撤销或导出原始 Word 查阅。</div>');renderPhotos();if($('#uploadBtn')){
-   if(p.canvas)$('#uploadBtn').onclick=()=>{$('#editPageCanvas').click();document.querySelector('.object-dialog[open] [data-action="upload"]')?.click();};
-   else $('#uploadBtn').onclick=()=>$('#photoFile').click();
+   $('#uploadBtn').onclick=()=>{addPhotoTarget={page:p,canvas:p.canvas};$('#photoFile').click();};
   }
  }else{e.innerHTML=`${processNumberWarning(true)}<div class="field">${fieldTop('物料清单','materials')}<table class="data-table"><thead><tr><th>编码＋名称</th><th>图号 / 规格</th><th style="width:65px">${A.layout==='wide-v2'?'备注':'数量'}</th><th style="width:28px"></th></tr></thead><tbody id="materialRows"></tbody></table>${p.fixed.includes('materials')?'':'<button id="addMaterial" style="margin-top:10px">＋ 添加物料</button>'}<div class="field-note">每张工序页预留 ${MAT_ROWS} 行。</div></div><div class="field section-gap">${fieldTop('检验与控制要求','checks')}<div id="checkRows"></div>${p.fixed.includes('checks')?'':'<button id="addCheck">＋ 添加检查项</button>'}<div class="field-note">每张工序页预留 ${A.layout==='wide-v2'?T.checkRows:2} 行。</div></div><label class="field"><span>备注</span><textarea id="notesInput" data-meta="notes" rows="3">${esc(p.notes)}</textarea></label>${A.layout==='wide-v2'?'<div id="changeRecords" class="field"></div>':''}`;
   bindInput($('#notesInput'),value=>p.notes=value);
@@ -791,9 +796,9 @@ function commitEditorChange(update,persist,saveAs,afterCommit){
  update(candidate);
  return projectFiles.save(saveAs,{project:projectForStorage(candidate),commit});
 }
-async function openPageCanvas(p,{startCallout=false}={}){
+async function openPageCanvas(p,{startCallout=false,photoFiles=[]}={}){
  const button=$('#editPageCanvas'),source=p.canvas||p.canvasDraft;
- if(!button||button.disabled)return;
+ if(!button||button.disabled||page()!==p||p.fixed.includes('photos'))return;
  if(p.importedContent&&!p.canvas)toast('画布仅载入照片素材；原生标注/复杂图文无法自动迁移。保存后使用重排副本，原稿仍保留，可导出原始 Word。',true);
  if(canvasSpace(p,source).textOverflow)return toast('文字已占满内容框，请先手动调整文字、字号或字间距，留出画布空间。',true);
  button.disabled=true;
@@ -812,7 +817,7 @@ async function openPageCanvas(p,{startCallout=false}={}){
   }
   const space=canvasSpace(p,model);
   if(space.textOverflow)return toast('文字已占满内容框，请先调整文字，留出画布空间。',true);
-  window.SOP_OBJECTS.open(model,{availableHeight:space.height,title:'工序图文画布',startCallout,onSave:(value,persist,saveAs)=>{
+  window.SOP_OBJECTS.open(model,{availableHeight:space.height,title:'工序图文画布',startCallout,photoFiles,onSave:(value,persist,saveAs)=>{
    if(!project.pages.includes(p)||p.fixed.includes('photos'))return false;
    return commitEditorChange(target=>{
     const i=target.pages.indexOf(p),saved={...p,canvas:value,fitSinglePage:false};
@@ -849,7 +854,7 @@ function renderPhotos(){
   replacePhotoTarget={page:p,canvas:p.canvas,id:el.dataset.replacePhoto};$('#replaceFile').click();
  });
  const note=g.parentElement.querySelector('.field-note');
- if(p.canvas&&note)note.textContent='可在这里编辑画布中的图片，也可以在画布中移动、缩放或粘贴新图片。';
+ if(p.canvas&&note)note.textContent='可多选图片，选好后进入画布调整。也可以在画布中粘贴新图片。';
 }
 async function filePhoto(file){
  const {data,width,height}=await window.SOP_OBJECTS.readPhoto(file,{allowOtherFormats:true});
@@ -1203,10 +1208,21 @@ async function savePhotoEdit(edit,persist,saveAs){
  }
  return commitEditorChange(target=>{target.pages[target.pages.indexOf(p)]=saved;},persist,saveAs);
 }
+$('#photoFile').oncancel=()=>{addPhotoTarget=undefined;};
+$('#photoFile').onchange=e=>{
+ const files=[...e.target.files],target=addPhotoTarget;
+ addPhotoTarget=undefined;
+ e.target.value='';
+ if(!files.length)return;
+ const p=page();
+ if(target&&(p!==target.page||p.canvas!==target.canvas||p.fixed.includes('photos')))return;
+ if(p?.canvas)void openPageCanvas(p,{photoFiles:files});
+ else void addPhotos(files);
+};
 $('#savePhoto').onclick=()=>void photoEdit?.editor.save();
 $('#closePhoto').onclick=()=>void photoEdit?.editor.requestClose();
 function help(){showForm('使用说明',`<div class="help"><p><strong>页面画布：</strong>选择工序后，点击“建立页面画布”，也可双击页面进入。照片外可放文字框和箭头；拖动移动，右下角缩放，右侧编辑属性。画布固定在本页，不自动缩放或续页，可返回原图文排版，草稿仍保留。</p><p><strong>流程图：</strong>导入原稿默认保留；建立编辑副本后可拖动节点、连接两个节点、修改分支标签。转换关系需核对，可随时切回原稿。按工序生成编辑副本每张最多 24 个节点；原有自动流程续页仍保留。</p><p><strong>新建：</strong>点击“新建”，填写文档信息，再按工序添加文字与现场照片。</p><p><strong>导入：</strong>支持 SOP 项目（.sop.json）和兼容当前表格结构的 .docx。原稿图片与原生标注会保留；浏览器按工序表格预览，普通 Word 导出使用固定单页模板；原稿随项目保留。请核对超框内容与浮动标注。</p><p><strong>固定沿用：</strong>在文字、配图或物料旁点击“设为固定沿用”，普通编辑会锁定。新增和复制页面时会沿用这些内容；点击“解锁”可以修改。</p><p><strong>页面：</strong>点击“按页面”查看实际页数，可拖动正文页排序，或用“移动到…”选择移动或交换两页；封面、履历和流程图也可编辑和排序，且不计入工序页码。每个工序固定一页，不自动缩放或续页。内容过多、超框或遮挡时，请手动调整字号、图片和画布位置，或主动新增工序页。</p><p><strong>保存：</strong>编辑后会在本机保留恢复缓存。“保存”或 Ctrl+S 写入当前 .sop.json；首次保存选择位置。“另存为”或 Ctrl+Shift+S 创建另一份文件并切换到它。导入 Word 不覆盖原 Word。新建、打开和关闭前会询问未保存的更改。画布编辑结束时可以保存、放弃更改或继续编辑。画布内按 Ctrl+S 会将当前编辑写入项目文件。部分浏览器仅支持下载副本，请核对下载完成；不同设备不会自动同步。</p><p><strong>Word：</strong>使用原稿表格骨架导出，文字、表格、图片、标注和流程图节点/连线均可继续在 WPS/Word 中单独编辑；工作台的固定沿用不会锁定导出的 Word。页码为动态域，导出附带项目数据，可再次恢复；检测到外部 Word 修改时可选择读取现有内容。</p><p><strong>PDF：</strong>桌面版点击“预览 / PDF”后选择“保存 PDF”；浏览器版在打印窗口选择 A4 横向、缩放 100%，关闭额外页眉页脚。PDF 与此工具的打印预览使用同一页面。</p><p>第一版的浏览器预览与 Word 分页可能受字体和办公软件影响；正式发放前请打开导出的 Word 核对。数据仅存储在本机，本工具无网络请求。</p></div>`,null);}
-if(A.layout==='wide-v2')document.body.classList.add('template-v2');$('#brandLogo').src=A.appLogo||A.logo;$('#undoBtn').onclick=()=>{const s=undo.pop();if(!s)return;project=s.project;selected=s.selected;renderEditor();changed();refresh();};$('#newBtn').onclick=async()=>{try{if(!await projectFiles.guard('new'))return;await projectFiles.detach();clearTimeout(saveTimer);const settings=clone(project.settings);project={schema:'sop-studio/v1',meta:{...clone(A.seed.meta),product:'',number:'',version:'A0',bare:'',packed:''},settings,history:[],pages:[blankPage()]};undo=[];selected=project.pages[0].id;renderEditor();changed();refresh();editMetadata();}catch(error){toast('新建失败：'+error.message,true);}};$('#importBtn').onclick=()=>projectFiles.open();$('#saveBtn').onclick=()=>saveProject(false);$('#saveAsBtn').onclick=()=>saveProject(true);$('#metaBtn').onclick=editMetadata;$('#settingsBtn').onclick=editSettings;$('#helpBtn').onclick=help;$('#addBtn').onclick=()=>addPage(false);$('#continueBtn').onclick=()=>addPage(true);$('#copyBtn').onclick=copyPage;$('#deleteBtn').onclick=deletePage;$('#moveBtn').onclick=openMovePage;$('#upBtn').onclick=()=>movePage(-1);$('#downBtn').onclick=()=>movePage(1);$('#processView').onclick=()=>{view='process';$('#processView').classList.add('active');$('#pageView').classList.remove('active');refreshNav();};$('#pageView').onclick=()=>{view='page';$('#pageView').classList.add('active');$('#processView').classList.remove('active');refreshNav();};$$('[data-tab]').forEach(button=>button.onclick=()=>{setEditorTab(button.dataset.tab);renderEditor();});$$('.close-dialog').forEach(b=>b.onclick=()=>$('#formDialog').close());$('#previewAllBtn').onclick=()=>showFull();$('#zoomBtn').onclick=()=>showFull(Math.max(0,selectedDocumentIndex()));$('#pdfBtn').onclick=()=>showFull();$('#printBtn').onclick=printPdf;$('#closePreview').onclick=()=>$('#previewDialog').close();$('#photoFile').onchange=async e=>{await addPhotos(e.target.files);e.target.value='';};$('#replaceFile').onchange=async e=>{
+if(A.layout==='wide-v2')document.body.classList.add('template-v2');$('#brandLogo').src=A.appLogo||A.logo;$('#undoBtn').onclick=()=>{const s=undo.pop();if(!s)return;project=s.project;selected=s.selected;renderEditor();changed();refresh();};$('#newBtn').onclick=async()=>{try{if(!await projectFiles.guard('new'))return;await projectFiles.detach();clearTimeout(saveTimer);const settings=clone(project.settings);project={schema:'sop-studio/v1',meta:{...clone(A.seed.meta),product:'',number:'',version:'A0',bare:'',packed:''},settings,history:[],pages:[blankPage()]};undo=[];selected=project.pages[0].id;renderEditor();changed();refresh();editMetadata();}catch(error){toast('新建失败：'+error.message,true);}};$('#importBtn').onclick=()=>projectFiles.open();$('#saveBtn').onclick=()=>saveProject(false);$('#saveAsBtn').onclick=()=>saveProject(true);$('#metaBtn').onclick=editMetadata;$('#settingsBtn').onclick=editSettings;$('#helpBtn').onclick=help;$('#addBtn').onclick=()=>addPage(false);$('#continueBtn').onclick=()=>addPage(true);$('#copyBtn').onclick=copyPage;$('#deleteBtn').onclick=deletePage;$('#moveBtn').onclick=openMovePage;$('#upBtn').onclick=()=>movePage(-1);$('#downBtn').onclick=()=>movePage(1);$('#processView').onclick=()=>{view='process';$('#processView').classList.add('active');$('#pageView').classList.remove('active');refreshNav();};$('#pageView').onclick=()=>{view='page';$('#pageView').classList.add('active');$('#processView').classList.remove('active');refreshNav();};$$('[data-tab]').forEach(button=>button.onclick=()=>{setEditorTab(button.dataset.tab);renderEditor();});$$('.close-dialog').forEach(b=>b.onclick=()=>$('#formDialog').close());$('#previewAllBtn').onclick=()=>showFull();$('#zoomBtn').onclick=()=>showFull(Math.max(0,selectedDocumentIndex()));$('#pdfBtn').onclick=()=>showFull();$('#printBtn').onclick=printPdf;$('#closePreview').onclick=()=>$('#previewDialog').close();$('#replaceFile').onchange=async e=>{
  const file=e.target.files[0],target=replacePhotoTarget;
  e.target.value='';replacePhotoTarget=null;
  if(!file||!target)return;
@@ -1301,7 +1317,7 @@ proofButton.onclick=async()=>{
  }catch(error){if(stillCurrent())toast('校样失败：'+error.message,true);}
  finally{proofButton.disabled=false;proofButton.textContent=proofLabel;}
 };
-window.SOP={projectForStorage,validateProjectedPages,canvasSpace,operationPhotoLayout,textStyle,bodyLines,snapshot,changed,renderEditor,moveDocumentPage,orderedPages,moveRenderedPage,get project(){return project;},get layout(){return layout;},get front(){return front;},uid,clone,esc,blankPage,validate,annotated,prepareImages,recalc,refresh,operationPaper,frontPaper,flowImage,toast,download,filename,replaceProject(p){snapshot();project=validate(p);selected=p.pages[0]?.id;renderEditor();changed();refresh();},setSelected(id){selected=id;renderEditor();refresh();}};
+window.SOP={projectForStorage,validateProjectedPages,canvasSpace,operationBodySpace,operationPhotoLayout,textStyle,bodyLines,snapshot,changed,renderEditor,moveDocumentPage,orderedPages,moveRenderedPage,get project(){return project;},get layout(){return layout;},get front(){return front;},uid,clone,esc,blankPage,validate,annotated,prepareImages,recalc,refresh,operationPaper,frontPaper,flowImage,toast,download,filename,replaceProject(p){snapshot();project=validate(p);selected=p.pages[0]?.id;renderEditor();changed();refresh();},setSelected(id){selected=id;renderEditor();refresh();}};
 projectFiles=window.SOP_FILES.create({getProject:()=>projectForStorage(project),filename,toast,download,stateText:p=>window.SOP_IMPORT.projectState(p),getEditor:window.SOP_OBJECTS.getActiveEditor,recover:flushSave,applyProject:async(p,commit)=>{const candidate=validate(p);await prepareImages(candidate);await commit();clearTimeout(saveTimer);project=candidate;undo=[];selected=project.pages[0]?.id;renderEditor();changed();refresh();}});
 function saveProject(saveAs){
  const editor=window.SOP_OBJECTS.getActiveEditor();

@@ -203,6 +203,16 @@
 .reference-station-foot span { border-bottom: var(--rule); align-content: center; }
 .preview-actions { justify-content: flex-end; margin-inline-start: 8px; }
 .reference-operation .wide-body .op-cell { padding: 0 calc(108 * var(--twip)); }
+.reference-op-content:has(>.regular-op-layout) { height: 100%; }
+.regular-op-layout {
+ display: flex;
+ flex-direction: column;
+ height: calc(100% - var(--sop-operation-bottom-gap));
+}
+.regular-op-layout > * { flex: none; }
+.regular-op-layout > [data-print-part="requirements"] { margin-top: auto; }
+/* Imported exact line heights come from the paragraph, including when a run uses a different font size. */
+.reference-operation .op-cell .imported-body > .imported-paragraph[style*="min-height:"] > span { line-height: 0; }
 .reference-operation .op-cell p,.reference-measure p {
  margin: 0 0 var(--sop-operation-paragraph-after); line-height: var(--sop-operation-line-height);
 }

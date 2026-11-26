@@ -450,9 +450,25 @@ async function exportDocx(project,layout,front,proofKey){
    for(const child of [...op.children])if(child.localName!=='tcPr')child.remove();
    op.append(operationHeading(d,'一、操作步骤：'));
    for(const line of window.SOP.bodyLines(p,'steps'))op.append(bodyParagraph(d,line,p,'steps',nextFitId));
+   let photoHeight=0;
    if(p.canvas)op.append(await canvasParagraph(p.canvas,contentWidth,p.canvasHeightPt));
-   else if(p.photos.length)for(const row of window.SOP.operationPhotoLayout(p.photos))op.append(await photoParagraph(row));
-   op.append(...operationRequirementBlocks(d,p,nextFitId));
+   else if(p.photos.length)for(const row of window.SOP.operationPhotoLayout(p.photos)){
+    const paragraph=await photoParagraph(row);
+    photoHeight+=twips(first(first(paragraph,'pPr'),'spacing'),'line');
+    op.append(paragraph);
+   }
+   const requirements=operationRequirementBlocks(d,p,nextFitId);
+   if(!p.canvas&&requirements.length){
+    const available=Math.round(window.SOP.operationBodySpace(p).pixels*15);
+    const gap=available-photoHeight;
+    if(gap>0){
+     const previous=first(first(op.lastElementChild,'pPr'),'spacing');
+     const heading=first(first(requirements[0],'pPr'),'spacing');
+     // Word uses the larger of adjacent before/after values.
+     heading.setAttributeNS(W,'w:before',gap+twips(previous,'after'));
+    }
+   }
+   op.append(...requirements);
    if(p.standardText)op.append(para(d,p.standardText,20));
   }
   if(!children(op,'p').length)op.append(para(d,'',2));
