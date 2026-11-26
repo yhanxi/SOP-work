@@ -211,6 +211,7 @@
 }
 .regular-op-layout > * { flex: none; }
 .regular-op-layout > [data-print-part="requirements"] { margin-top: auto; }
+.op-text-section p { word-break: break-all; line-break: strict; }
 /* Imported exact line heights come from the paragraph, including when a run uses a different font size. */
 .reference-operation .op-cell .imported-body > .imported-paragraph[style*="min-height:"] > span { line-height: 0; }
 .reference-operation .op-cell p,.reference-measure p {

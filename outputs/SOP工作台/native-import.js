@@ -240,6 +240,9 @@ function textProperties(pr,theme,language){
 function paragraphProperties(pr){
  const s={},spacing=one(pr,'spacing'),line=points(val(spacing,'line')),rule=val(spacing,'lineRule')||'auto',jc=val(one(pr,'jc'),'val');
  if(['left','right','center','justify','both'].includes(jc))s['text-align']=jc==='both'?'justify':jc;
+ const wordWrap=one(pr,'wordWrap'),kinsoku=one(pr,'kinsoku');
+ if(wordWrap)s['word-break']=isSet(wordWrap)?'normal':'break-all';
+ if(kinsoku)s['line-break']=isSet(kinsoku)?'strict':'auto';
  if(line>0)s['line-height']=rule==='auto'?String(line/12):rule==='atLeast'?'max(1.15em,'+line+'pt)':line+'pt';
  for(const [property,css]of [['before','margin-top'],['after','margin-bottom']]){
   const pt=points(val(spacing,property));

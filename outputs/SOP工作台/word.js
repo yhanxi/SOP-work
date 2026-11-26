@@ -29,8 +29,8 @@ function exactParagraphSpacing(doc,p,line,after=0){
 function bodyParagraph(doc,runs,page,key,nextFitId){
  const f=window.SOP.textStyle(page,key),size=Math.round(f.fontSize*2),p=para(doc,'',size),pr=first(p,'pPr');
  first(p,'r').remove();
- // Match the workbench's text spacing, including mixed Chinese and Latin text.
- pr.prepend(el(doc,'overflowPunct',{val:0}),el(doc,'autoSpaceDE',{val:0}),el(doc,'autoSpaceDN',{val:0}),el(doc,'adjustRightInd',{val:0}));
+ // In WordprocessingML, wordWrap="0" allows a word to break between characters.
+ pr.prepend(el(doc,'kinsoku',{val:1}),el(doc,'wordWrap',{val:0}),el(doc,'overflowPunct',{val:0}),el(doc,'autoSpaceDE',{val:0}),el(doc,'autoSpaceDN',{val:0}),el(doc,'adjustRightInd',{val:0}));
  exactParagraphSpacing(doc,p,Math.round(f.fontSize*operationText.lineHeight*20),operationText.paragraphAfter);
  pr.append(el(doc,'contextualSpacing',{val:0}),el(doc,'jc',{val:'left'}));
  for(const segment of operationRuns(runs)){
