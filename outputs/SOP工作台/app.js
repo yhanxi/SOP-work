@@ -1102,44 +1102,193 @@ async function openPhoto(id){
  try{
   const im=await loadImage(ph.data);
   if(page()!==p||!currentPhotos(p).includes(ph)||window.SOP_OBJECTS.getActiveEditor())return;
-  const dialog=$('#photoDialog'),edit=photoEdit={page:p,canvas:p.canvas,original:ph,photo:{...clone(ph),marks:clone(ph.marks||[])},im,tool:'arrow',drag:null,crop:null,pointTransforms:[]};
+  const dialog=$('#photoDialog'),edit=photoEdit={page:p,canvas:p.canvas,original:ph,photo:{...clone(ph),marks:clone(ph.marks||[])},im,tool:'arrow',drag:null,crop:null,cropUndo:null,pointTransforms:[]};
   edit.editor=window.SOP_OBJECTS.trackEditor(dialog,{title:'图片标注',isDirty:()=>photoDraftChanged(edit),
-   isBusy:()=>edit.transforming,message:text=>{$('#cropHint').textContent=text;},onClose:()=>{photoEdit=null;},
+   isBusy:()=>edit.transforming,message:text=>{$('#cropHint').textContent=text;},onClose:()=>{clearPhotoDrag(edit);edit.cropUndo=null;photoEdit=null;$('#undoCrop').disabled=true;},
    onSave:(persist,saveAs)=>savePhotoEdit(edit,persist,saveAs)});
   dialog.showModal();renderPresets();$$('[data-tool]').forEach(b=>b.classList.toggle('active',b.dataset.tool==='arrow'));renderCanvas();
  }catch(error){toast('图片打开失败：'+error.message,true);}
 }
-function renderCanvas(){if(!photoEdit)return;const c=$('#annotationCanvas'),im=photoEdit.im,scale=Math.min(1,940/im.width,510/im.height);const pixelRatio=Math.max(2,window.devicePixelRatio||1);c.width=Math.round(im.width*scale*pixelRatio);c.height=Math.round(im.height*scale*pixelRatio);c.style.width=Math.round(im.width*scale)+'px';const ctx=c.getContext('2d');ctx.drawImage(im,0,0,c.width,c.height);drawMarks(ctx,photoEdit.photo.marks,c.width,c.height);if(photoEdit.drag&&photoEdit.tool!=='crop')drawMarks(ctx,[photoEdit.drag],c.width,c.height);const r=photoEdit.crop||(photoEdit.tool==='crop'?photoEdit.drag:null);if(r){ctx.strokeStyle='#0c78d4';ctx.lineWidth=2;ctx.setLineDash([6,5]);ctx.strokeRect(r.x*c.width,r.y*c.height,(r.x2-r.x)*c.width,(r.y2-r.y)*c.height);ctx.setLineDash([]);}$('#cropHint').textContent=photoEdit.tool==='crop'?'拖动选择范围，再点击“应用裁剪”。':'';}
-const point=e=>{const r=$('#annotationCanvas').getBoundingClientRect();return {x:Math.max(0,Math.min(1,(e.clientX-r.left)/r.width)),y:Math.max(0,Math.min(1,(e.clientY-r.top)/r.height))};};
-$('#annotationCanvas').onpointerdown=e=>{if(!photoEdit||photoEdit.transforming)return;const p=point(e),m={type:photoEdit.tool,...p,x2:p.x,y2:p.y,color:$('#annotationColor').value,text:$('#annotationText').value,background:$('#annotationTransparent').checked?'transparent':$('#annotationBackground').value,fontSize:Number($('#annotationSize').value)};if(photoEdit.tool==='text'){photoEdit.photo.marks.push(m);renderCanvas();return;}photoEdit.drag=m;e.currentTarget.setPointerCapture(e.pointerId);};
-$('#annotationCanvas').onpointermove=e=>{if(!photoEdit?.drag)return;const p=point(e);photoEdit.drag.x2=p.x;photoEdit.drag.y2=p.y;renderCanvas();};
+const annotationCanvas=$('#annotationCanvas'),photoCropMinimum=.02;
+const clampPhotoPoint=(value,min,max)=>Math.max(min,Math.min(max,value));
+function photoPoint(event,bounds,bounded=true){
+ const x=(event.clientX-bounds.left)/bounds.width,y=(event.clientY-bounds.top)/bounds.height;
+ return bounded?{x:clampPhotoPoint(x,0,1),y:clampPhotoPoint(y,0,1)}:{x,y};
+}
+const photoCropValid=rect=>rect&&rect.x2-rect.x+Number.EPSILON>=photoCropMinimum&&rect.y2-rect.y+Number.EPSILON>=photoCropMinimum;
+const photoCropPixels=(size,original)=>Math.max(1,Math.round(size*original));
+
+function drawPhotoCrop(ctx,rect,active){
+ const {width,height}=annotationCanvas.getBoundingClientRect();
+ if(!width||!height)return;
+ const x=rect.x*width,y=rect.y*height,right=rect.x2*width,bottom=rect.y2*height;
+ ctx.save();
+ ctx.scale(annotationCanvas.width/width,annotationCanvas.height/height);
+ if(active){
+  ctx.fillStyle='rgba(0,0,0,.58)';
+  ctx.beginPath();
+  ctx.rect(0,0,width,height);
+  ctx.rect(x,y,right-x,bottom-y);
+  ctx.fill('evenodd');
+ }
+ if(!active)ctx.setLineDash([6,5]);
+ ctx.strokeStyle='#111';
+ ctx.lineWidth=5;
+ ctx.strokeRect(x,y,right-x,bottom-y);
+ ctx.strokeStyle='#fff';
+ ctx.lineWidth=2;
+ ctx.strokeRect(x,y,right-x,bottom-y);
+ if(active){
+  ctx.strokeStyle='#111';
+  ctx.fillStyle='#fff';
+  ctx.lineWidth=1.5;
+  for(const [cx,cy] of [[x,y],[(x+right)/2,y],[right,y],[x,(y+bottom)/2],[right,(y+bottom)/2],[x,bottom],[(x+right)/2,bottom],[right,bottom]]){
+   ctx.fillRect(cx-3.5,cy-3.5,7,7);
+   ctx.strokeRect(cx-3.5,cy-3.5,7,7);
+  }
+ }
+ ctx.restore();
+}
+
+function renderCanvas(){
+ if(!photoEdit)return;
+ const {im,photo,tool,drag,crop,cropDrag}=photoEdit,c=annotationCanvas;
+ const scale=Math.min(1,940/im.width,510/im.height),pixelRatio=Math.max(2,window.devicePixelRatio||1);
+ const width=Math.max(1,Math.round(im.width*scale*pixelRatio)),height=Math.max(1,Math.round(im.height*scale*pixelRatio));
+ if(c.width!==width)c.width=width;
+ if(c.height!==height)c.height=height;
+ c.style.width=Math.max(1,Math.round(im.width*scale))+'px';
+ const ctx=c.getContext('2d');
+ ctx.clearRect(0,0,width,height);
+ ctx.drawImage(im,0,0,width,height);
+ drawMarks(ctx,photo.marks,width,height);
+ if(drag)drawMarks(ctx,[drag],width,height);
+ const cropActive=tool==='crop',rect=cropDrag?.rect||crop;
+ c.style.cursor=cropActive?(cropDrag?.cursor||'crosshair'):'';
+ const hint=$('#cropHint');
+ if(rect){
+  drawPhotoCrop(ctx,rect,cropActive);
+  const size=photoCropPixels(rect.x2-rect.x,im.naturalWidth)+' × '+photoCropPixels(rect.y2-rect.y,im.naturalHeight)+' 像素';
+  hint.textContent=cropActive?size+' · 拖框移动，拖边或角调整，框外可重画。':'待裁剪 '+size+'，保存图片标注时应用。';
+ }else{
+  hint.textContent=cropActive?'拖动画出裁剪范围，再点击“应用裁剪”。':'';
+ }
+}
+
+function photoCropHit(rect,point,bounds){
+ if(rect){
+  const hitX=Math.min(8/bounds.width,(rect.x2-rect.x)/4),hitY=Math.min(8/bounds.height,(rect.y2-rect.y)/4);
+  if(point.x>=rect.x-hitX&&point.x<=rect.x2+hitX&&point.y>=rect.y-hitY&&point.y<=rect.y2+hitY){
+   const edgeX=point.x<=rect.x+hitX?-1:point.x>=rect.x2-hitX?1:0;
+   const edgeY=point.y<=rect.y+hitY?-1:point.y>=rect.y2-hitY?1:0;
+   if(!edgeX&&!edgeY)return {mode:'move',cursor:'move'};
+   const cursor=edgeX&&edgeY?(edgeX===edgeY?'nwse-resize':'nesw-resize'):edgeX?'ew-resize':'ns-resize';
+   return {mode:'resize',edgeX,edgeY,cursor};
+  }
+ }
+ return {mode:'draw',cursor:'crosshair'};
+}
+
+function movePhotoCrop(drag,point){
+ const {start,original,mode,edgeX,edgeY}=drag,dx=point.x-start.x,dy=point.y-start.y;
+ if(mode==='draw'){
+  const x=clampPhotoPoint(point.x,0,1),y=clampPhotoPoint(point.y,0,1);
+  return {x:Math.min(start.x,x),y:Math.min(start.y,y),x2:Math.max(start.x,x),y2:Math.max(start.y,y)};
+ }
+ if(mode==='move'){
+  const x=clampPhotoPoint(dx,-original.x,1-original.x2),y=clampPhotoPoint(dy,-original.y,1-original.y2);
+  return {x:original.x+x,y:original.y+y,x2:original.x2+x,y2:original.y2+y};
+ }
+ const rect={...original};
+ if(edgeX<0)rect.x=clampPhotoPoint(original.x+dx,0,original.x2-photoCropMinimum);
+ if(edgeX>0)rect.x2=clampPhotoPoint(original.x2+dx,original.x+photoCropMinimum,1);
+ if(edgeY<0)rect.y=clampPhotoPoint(original.y+dy,0,original.y2-photoCropMinimum);
+ if(edgeY>0)rect.y2=clampPhotoPoint(original.y2+dy,original.y+photoCropMinimum,1);
+ return rect;
+}
+
+annotationCanvas.onpointerdown=e=>{
+ const edit=photoEdit;
+ if(!edit||edit.transforming||edit.pointerId!=null||e.button!==0)return;
+ const bounds=annotationCanvas.getBoundingClientRect(),p=photoPoint(e,bounds);
+ if(edit.tool==='crop'){
+  edit.cropDrag={...photoCropHit(edit.crop,p,bounds),start:p,original:edit.crop};
+  edit.cropDrag.rect=movePhotoCrop(edit.cropDrag,p);
+ }else{
+  const mark={type:edit.tool,...p,x2:p.x,y2:p.y,color:$('#annotationColor').value,text:$('#annotationText').value,background:$('#annotationTransparent').checked?'transparent':$('#annotationBackground').value,fontSize:Number($('#annotationSize').value)};
+  if(edit.tool==='text'){edit.photo.marks.push(mark);renderCanvas();return;}
+  edit.drag=mark;
+ }
+ edit.pointerId=e.pointerId;
+ annotationCanvas.setPointerCapture(e.pointerId);
+ if(edit.cropDrag)renderCanvas();
+};
+function updatePhotoDrag(edit,event){
+ const p=photoPoint(event,annotationCanvas.getBoundingClientRect(),!edit.cropDrag);
+ if(edit.cropDrag)edit.cropDrag.rect=movePhotoCrop(edit.cropDrag,p);
+ if(edit.drag){edit.drag.x2=p.x;edit.drag.y2=p.y;}
+}
+function updatePhotoCropCursor(event){
+ const bounds=annotationCanvas.getBoundingClientRect();
+ annotationCanvas.style.cursor=photoCropHit(photoEdit.crop,photoPoint(event,bounds),bounds).cursor;
+}
+annotationCanvas.onpointermove=e=>{
+ const edit=photoEdit;
+ if(!edit||edit.transforming)return;
+ if(edit.pointerId===e.pointerId){
+  updatePhotoDrag(edit,e);renderCanvas();
+ }else if(edit.pointerId==null&&edit.tool==='crop')updatePhotoCropCursor(e);
+};
 const photoDragChanged=drag=>drag&&Math.abs(drag.x-drag.x2)+Math.abs(drag.y-drag.y2)>.015;
 function photoDraftChanged(edit){
- return !!edit.crop||photoDragChanged(edit.drag)||edit.photo.data!==edit.original.data||
-  !window.SOP_OBJECTS.sameDraft(edit.photo.marks,edit.original.marks||[]);
+ return !!edit.crop||photoCropValid(edit.cropDrag?.rect)||photoDragChanged(edit.drag)||edit.photo.data!==edit.original.data||
+  edit.pointTransforms.length>0||!window.SOP_OBJECTS.sameDraft(edit.photo.marks,edit.original.marks||[]);
 }
-function finishPhotoDrag(){
- if(!photoEdit?.drag)return;
- const drag=photoEdit.drag;
- if(photoDragChanged(drag)){
-  if(photoEdit.tool==='crop')photoEdit.crop=drag;
-  else photoEdit.photo.marks.push(drag);
- }
- photoEdit.drag=null;renderCanvas();
+function clearPhotoDrag(edit){
+ const {pointerId}=edit;
+ edit.drag=edit.cropDrag=edit.pointerId=null;
+ if(pointerId!=null&&annotationCanvas.hasPointerCapture(pointerId))annotationCanvas.releasePointerCapture(pointerId);
 }
-$('#annotationCanvas').onpointerup=finishPhotoDrag;
-$('#annotationCanvas').onpointercancel=()=>{if(photoEdit){photoEdit.drag=null;renderCanvas();}};
-$$('[data-tool]').forEach(b=>b.onclick=()=>{photoEdit.tool=b.dataset.tool;photoEdit.drag=null;$$('[data-tool]').forEach(x=>x.classList.toggle('active',x===b));renderCanvas();});$('#markUndo').onclick=()=>{if(!photoEdit||photoEdit.transforming)return;photoEdit.photo.marks.pop();renderCanvas();};
-async function transformPhoto(paint,remapMarks,mapPoint){
+function finishPhotoDrag(event){
+ const edit=photoEdit;
+ if(!edit||edit.pointerId==null||(event&&edit.pointerId!==event.pointerId))return;
+ if(event)updatePhotoDrag(edit,event);
+ if(photoCropValid(edit.cropDrag?.rect))edit.crop=edit.cropDrag.rect;
+ else if(photoDragChanged(edit.drag))edit.photo.marks.push(edit.drag);
+ clearPhotoDrag(edit);renderCanvas();
+ if(event&&edit.tool==='crop')updatePhotoCropCursor(event);
+}
+function cancelPhotoDrag(event){
+ const edit=photoEdit;
+ if(!edit||edit.pointerId==null||(event&&edit.pointerId!==event.pointerId))return;
+ clearPhotoDrag(edit);renderCanvas();
+}
+annotationCanvas.onpointerup=finishPhotoDrag;
+annotationCanvas.onpointercancel=annotationCanvas.onlostpointercapture=cancelPhotoDrag;
+$$('[data-tool]').forEach(b=>b.onclick=()=>{
+ if(!photoEdit||photoEdit.transforming)return;
+ clearPhotoDrag(photoEdit);
+ photoEdit.tool=b.dataset.tool;
+ $$('[data-tool]').forEach(x=>x.classList.toggle('active',x===b));
+ renderCanvas();
+});
+$('#markUndo').onclick=()=>{if(!photoEdit||photoEdit.transforming)return;photoEdit.photo.marks.pop();renderCanvas();};
+async function transformPhoto(paint,remapMarks,mapPoint,{rememberCrop=false}={}){
  const edit=photoEdit;
  if(!edit||edit.transforming)return;
  edit.transforming=true;
+ $('#undoCrop').disabled=true;
  try{
   const canvas=document.createElement('canvas');
   paint(canvas,edit.im);
   const data=window.SOP_OBJECTS.encodePhotoCanvas(canvas,edit.photo.data),image=await loadImage(data);
   if(photoEdit!==edit)return;
-  edit.photo.marks=remapMarks(clone(edit.photo.marks));
+  const marks=remapMarks(clone(edit.photo.marks));
+  if(rememberCrop){
+   edit.cropUndo={photo:{...edit.photo},im:edit.im,marksAfterCrop:marks.slice(),pointTransformCount:edit.pointTransforms.length,rotated:false};
+  }else if(edit.cropUndo)edit.cropUndo.rotated=true;
+  clearPhotoDrag(edit);
+  edit.photo.marks=marks;
   if(edit.canvas)edit.pointTransforms.push(mapPoint);
   edit.photo.data=data;
   edit.photo.width=image.naturalWidth;
@@ -1150,7 +1299,10 @@ async function transformPhoto(paint,remapMarks,mapPoint){
  }catch(error){
   if(photoEdit===edit)toast('图片处理失败：'+error.message,true);
   return false;
- }finally{edit.transforming=false;}
+ }finally{
+  edit.transforming=false;
+  if(photoEdit===edit)$('#undoCrop').disabled=!edit.cropUndo;
+ }
 }
 $('#rotatePhoto').onclick=()=>transformPhoto((canvas,image)=>{
  canvas.width=image.naturalHeight;
@@ -1167,14 +1319,16 @@ $('#rotatePhoto').onclick=()=>transformPhoto((canvas,image)=>{
  return marks;
 },(x,y)=>[1-y,x]);
 function applyPhotoCrop(){
- if(!photoEdit?.crop){toast('请先拖动选择裁剪范围。');return false;}
+ if(!photoEdit||photoEdit.transforming)return false;
+ if(photoEdit.cropDrag)finishPhotoDrag();
+ if(!photoEdit.crop){toast('请先拖动选择裁剪范围。');return false;}
  const crop=photoEdit.crop,x=Math.min(crop.x,crop.x2),y=Math.min(crop.y,crop.y2);
  const width=Math.abs(crop.x2-crop.x),height=Math.abs(crop.y2-crop.y);
- if(width<.02||height<.02){toast('裁剪范围太小，请扩大选择。',true);return false;}
+ if(!photoCropValid(crop)){toast('裁剪范围太小，请扩大选择。',true);return false;}
  return transformPhoto((canvas,image)=>{
   const w=image.naturalWidth*width,h=image.naturalHeight*height;
-  canvas.width=Math.max(1,Math.round(w));
-  canvas.height=Math.max(1,Math.round(h));
+  canvas.width=photoCropPixels(width,image.naturalWidth);
+  canvas.height=photoCropPixels(height,image.naturalHeight);
   canvas.getContext('2d').drawImage(image,x*image.naturalWidth,y*image.naturalHeight,w,h,0,0,canvas.width,canvas.height);
  },marks=>{
   for(const mark of marks){
@@ -1184,9 +1338,24 @@ function applyPhotoCrop(){
    mark.y2=(mark.y2-y)/height;
   }
   return marks.filter(mark=>mark.x>=0&&mark.x<=1&&mark.y>=0&&mark.y<=1);
- },(px,py)=>[(px-x)/width,(py-y)/height]);
+ },(px,py)=>[(px-x)/width,(py-y)/height],{rememberCrop:true});
 }
 $('#applyCrop').onclick=applyPhotoCrop;
+$('#undoCrop').onclick=()=>{
+ const edit=photoEdit,undo=edit?.cropUndo;
+ if(!undo||edit.transforming)return;
+ const laterEdits=undo.rotated||edit.crop||edit.cropDrag||edit.drag||!window.SOP_OBJECTS.sameDraft(edit.photo.marks,undo.marksAfterCrop);
+ if(laterEdits&&!confirm('恢复到最近一次裁剪前？裁剪后对这张图片的编辑也会一并撤销。'))return;
+ clearPhotoDrag(edit);
+ edit.photo=undo.photo;
+ edit.im=undo.im;
+ edit.pointTransforms.length=undo.pointTransformCount;
+ edit.crop=null;
+ edit.cropUndo=null;
+ $('#undoCrop').disabled=true;
+ renderCanvas();
+ $('#cropHint').textContent='已恢复到最近一次裁剪前。';
+};
 async function savePhotoEdit(edit,persist,saveAs){
  if(!photoDraftChanged(edit))return persist?projectFiles.save(saveAs):true;
  finishPhotoDrag();
